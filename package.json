@@ -4,13 +4,15 @@
   "version": "0.1.0",
   "description": "AI-assisted room booking front-end for Steelcase RoomWizard systems",
   "workspaces": [
-    "relay"
+    "relay",
+    "web"
   ],
   "scripts": {
     "dev": "npm run dev --workspace relay",
-    "build": "npm run build --workspace relay",
-    "test": "npm run test --workspace relay",
-    "typecheck": "npm run typecheck --workspace relay"
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
     "node": ">=20"

@@ -1,0 +1,139 @@
+/**
+ * Client for the relay API.
+ *
+ * Types mirror `relay/src/rooms.ts` and `relay/src/availability.ts`. They are
+ * duplicated rather than shared because the two halves deploy independently —
+ * the UI to static hosting, the relay to a machine on the building's network —
+ * and a shared package would couple their release cycles for four interfaces.
+ */
+
+export type Amenity = "camera" | "pc" | "cisco_vc" | "audio_conf";
+
+export interface Room {
+  id: string;
+  name: string;
+  host: string;
+  capacity: number;
+  floor: number | null;
+  location: string;
+  amenities: Amenity[];
+  facilities: string;
+  online: boolean;
+  isPrivate: boolean;
+}
+
+export interface Fleet {
+  site: string;
+  rooms: Room[];
+  dayStartHour: number;
+  dayEndHour: number;
+  slotMinutes: number;
+  timezone: string;
+  applianceTime: string | null;
+}
+
+export interface Booking {
+  id: string;
+  roomId: string;
+  /** ISO 8601 with an explicit offset. */
+  start: string;
+  end: string;
+  /** Null when the booking is confidential. */
+  purpose: string | null;
+  host: string | null;
+  isConfidential: boolean;
+  createdAt: string | null;
+}
+
+export interface Interval {
+  start: string;
+  end: string;
+}
+
+export interface RoomAvailability {
+  room: Room;
+  busy: Booking[];
+  free: Interval[];
+}
+
+export interface AvailabilityResult {
+  from: string;
+  to: string;
+  fleet: Omit<Fleet, "rooms">;
+  rooms: RoomAvailability[];
+  errors: { roomId: string; host: string; message: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Relay location
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEY = "relayUrl";
+
+/**
+ * The relay lives on the building's network, so its address differs per
+ * deployment and can't be baked into a statically-hosted bundle. Build-time
+ * default, overridable at runtime from the settings panel.
+ */
+export function getRelayUrl(): string {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored && stored.trim()) return stored.trim().replace(/\/+$/, "");
+  const fromEnv = import.meta.env.VITE_RELAY_URL as string | undefined;
+  return (fromEnv ?? "http://localhost:8787").replace(/\/+$/, "");
+}
+
+export function setRelayUrl(url: string): void {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (trimmed) localStorage.setItem(STORAGE_KEY, trimmed);
+  else localStorage.removeItem(STORAGE_KEY);
+}
+
+export class RelayError extends Error {
+  readonly status: number;
+  readonly isNetwork: boolean;
+
+  constructor(message: string, status: number, isNetwork = false) {
+    super(message);
+    this.name = "RelayError";
+    this.status = status;
+    this.isNetwork = isNetwork;
+  }
+}
+
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${getRelayUrl()}${path}`, { signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    // Distinguished from an HTTP error because the cause is almost always
+    // "relay isn't running" or "you're off the building's network", and the UI
+    // should say so rather than show a generic failure.
+    throw new RelayError(
+      `Can't reach the relay at ${getRelayUrl()}`,
+      0,
+      true,
+    );
+  }
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = (await res.json()) as { error?: string; detail?: string };
+      if (body.error) detail = body.detail ? `${body.error}: ${body.detail}` : body.error;
+    } catch {
+      // Non-JSON error body; the status line is all we have.
+    }
+    throw new RelayError(detail, res.status);
+  }
+
+  return (await res.json()) as T;
+}
+
+export const fetchFleet = (signal?: AbortSignal) => get<Fleet>("/api/rooms", signal);
+
+export const fetchAvailability = (from: string, days: number, signal?: AbortSignal) =>
+  get<AvailabilityResult>(
+    `/api/availability?from=${encodeURIComponent(from)}&days=${days}`,
+    signal,
+  );

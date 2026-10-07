@@ -7,3 +7,5 @@ coverage/
 .env.local
 relay/.env
 SECURITY-NOTES.md
+web/dist/
+*.tsbuildinfo

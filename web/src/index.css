@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* The appliances' own UI is light-only; respecting the OS preference costs
+   nothing and this gets used in dim labs. */
+@layer base {
+  html {
+    color-scheme: light dark;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-white text-slate-900 antialiased;
+  }
+  @media (prefers-color-scheme: dark) {
+    body {
+      @apply bg-slate-950 text-slate-100;
+    }
+  }
+}

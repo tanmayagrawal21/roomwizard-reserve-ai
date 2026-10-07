@@ -1,0 +1,59 @@
+name: Deploy web to Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let an in-progress deploy finish rather than cancelling it mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck --workspace web
+
+      - name: Build
+        # The relay lives on the building's private network, so no URL baked in
+        # here could work for everyone. The app falls back to localhost and the
+        # address is changeable at runtime from the Relay panel. Set the repo
+        # variable RELAY_URL if your deployment has a stable public hostname.
+        env:
+          VITE_RELAY_URL: ${{ vars.RELAY_URL }}
+        run: npm run build --workspace web
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

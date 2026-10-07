@@ -16,17 +16,21 @@ the build plan.
 
 ## Status
 
-**Phase 1 complete** — the relay's read path is built, tested, and verified against the
+**Phases 1-2 complete** — the relay and a read-only picker UI, both verified against the
 live BSRL fleet.
 
 | Phase | What | State |
 |---|---|---|
 | 0 | Validate the appliance write path | ✅ verified live |
 | 1 | Relay: roster + availability | ✅ done, 79 tests |
-| 2 | Picker UI on GitHub Pages | next |
-| 3 | Booking (writes) | — |
+| 2 | Picker UI | ✅ done |
+| 3 | Booking (writes) | next |
 | 4 | Slot finder | — |
 | 5 | Chat (local Qwen via Ollama) | — |
+
+Booking is not wired up yet, so the UI is currently read-only: you can see every room's
+day at a glance and filter down to the ones that suit, but you still reserve through the
+appliance's own page.
 
 ## Why there is a relay
 
@@ -43,28 +47,72 @@ or VPN.**
 
 ## Running it
 
+Requires Node 20+. **You must be on the building's network or its VPN** — the appliances
+are on private addresses, so nothing works off-network.
+
+Two processes, two terminals:
+
 ```bash
 npm install
-cp relay/example.env relay/.env      # edit if you are not at BSRL
-npm run dev --workspace relay        # http://localhost:8787
+
+# Terminal 1 - the relay (talks to the appliances)
+npm run dev                  # http://localhost:8787
+
+# Terminal 2 - the web UI
+npm run dev:web              # http://localhost:5173
 ```
 
-Requires Node 20+.
+Then open <http://localhost:5173>. The UI defaults to a relay at
+`http://localhost:8787`; if yours is elsewhere, use the **Relay** button in the top right
+rather than rebuilding.
+
+To configure a non-BSRL installation, `cp relay/example.env relay/.env` and edit. The
+`dev` and `start` scripts load it automatically.
+
+### Checks
 
 ```bash
-npm test             # 79 tests, no network access
+npm test          # 79 relay tests, no network access needed
 npm run typecheck
 npm run build
 ```
 
-With Docker, on a host inside the building's network:
+### Docker
+
+The relay is containerized for running on a host inside the building's network:
 
 ```bash
 docker build -f relay/Dockerfile -t rw-relay .
 docker run -p 8787:8787 --env-file relay/.env rw-relay
 ```
 
-## API
+### Deploying the UI
+
+`.github/workflows/pages.yml` publishes `web/` to GitHub Pages on push to `main`. Enable
+Pages for the repo with **Source: GitHub Actions** first.
+
+Two things to know. Add the Pages origin to `RW_ALLOWED_ORIGINS` on the relay, or the
+browser will refuse the requests. And a hosted HTTPS page calling a relay on
+`http://localhost` works in Chrome and Firefox, which treat localhost as a trustworthy
+origin, but Safari is stricter — for a shared deployment give the relay a real hostname
+with a valid certificate and set the repo variable `RELAY_URL`.
+
+## What the UI does
+
+A week strip with a density bar per day, so you can see at a glance that Thursday is
+packed and Friday is open — the thing the appliance's own interface makes you arrow
+through blindly. Picking a day shows all rooms as timelines across the bookable window,
+with the current time marked.
+
+Filter chips narrow by seats, equipment (camera, in-room PC, Cisco VC, audio conf),
+floor, and whether a room has an unbroken free gap of at least 30m / 1h / 2h. Each row
+also shows its longest gap and the actual free windows as text.
+
+Rooms whose appliance didn't answer are shown as "couldn't read this room's schedule"
+rather than as empty — "free" and "unknown" are different claims and the UI shouldn't
+conflate them.
+
+## Relay API
 
 ### `GET /healthz`
 
