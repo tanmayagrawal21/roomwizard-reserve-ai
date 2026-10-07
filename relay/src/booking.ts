@@ -28,9 +28,11 @@ import { BOOKING_DEFAULTS, extractFormError, parseFormFields, type FormFields } 
 import { fetchBookings, type RawBooking } from "./roomwizard.ts";
 import type { Room } from "./rooms.ts";
 import {
+  parseApplianceTimestamp,
   toApplianceDate,
   toApplianceTime,
   toFormDateParts,
+  toIso,
   type Instant,
 } from "./time.ts";
 
@@ -161,10 +163,24 @@ export function matchCreatedBooking(
   const startMs = start.getTime();
   const endMs = end.getTime();
 
+  // Appliance timestamps carry no offset, so they must go through
+  // parseApplianceTimestamp (which interprets them in the fleet's configured
+  // zone) rather than Date.parse — Date.parse resolves an offset-less string
+  // against the *process's* system timezone, which is an environment detail
+  // that has nothing to do with where the appliance is installed. On a Mac
+  // whose system zone happens to be America/Phoenix this bug is invisible;
+  // under the project's own Dockerfile (node:22-alpine, system TZ=UTC) it
+  // would make every real success look like "accepted but could not be
+  // confirmed". Caught by CI running on a UTC runner, not by local testing.
   const candidates = raw.filter((b) => {
-    const bs = Date.parse(toIsoish(b.start));
-    const be = Date.parse(toIsoish(b.end));
-    return bs === startMs && be === endMs;
+    try {
+      return (
+        parseApplianceTimestamp(b.start).getTime() === startMs &&
+        parseApplianceTimestamp(b.end).getTime() === endMs
+      );
+    } catch {
+      return false;
+    }
   });
   if (candidates.length === 0) return null;
 
@@ -177,15 +193,10 @@ export function matchCreatedBooking(
 
   return {
     id: String(chosen.Id),
-    start: toIsoish(chosen.start),
-    end: toIsoish(chosen.end),
+    start: toIso(parseApplianceTimestamp(chosen.start)),
+    end: toIso(parseApplianceTimestamp(chosen.end)),
     purpose: chosen.purpose,
   };
-}
-
-/** `2026/10/07 14:00:00` -> something `Date.parse` accepts, for a bare equality check. */
-export function toIsoish(applianceTimestamp: string): string {
-  return applianceTimestamp.replace(/\//g, "-").replace(" ", "T");
 }
 
 export interface CancelBookingArgs {
