@@ -4,3 +4,4 @@ coverage
 test
 *.log
 .env*
+example.env

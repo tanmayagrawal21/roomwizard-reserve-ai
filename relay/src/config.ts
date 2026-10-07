@@ -6,7 +6,7 @@
  * has actually been tested against — but nothing in the code assumes it.
  *
  * To point the relay at a different RoomWizard installation you need, at
- * minimum, `RW_ROSTER_HOST` and `RW_TIMEZONE`. See `.env.example`.
+ * minimum, `RW_ROSTER_HOST` and `RW_TIMEZONE`. See `example.env`.
  *
  * Legacy `BSRL_*` names are still honoured so existing deployments keep
  * working; `RW_*` wins if both are set.

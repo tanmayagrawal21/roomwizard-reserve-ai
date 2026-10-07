@@ -45,7 +45,7 @@ or VPN.**
 
 ```bash
 npm install
-cp relay/.env.example relay/.env     # edit if you are not at BSRL
+cp relay/example.env relay/.env      # edit if you are not at BSRL
 npm run dev --workspace relay        # http://localhost:8787
 ```
 
@@ -122,7 +122,7 @@ DST is exactly the kind of thing that hides this bug until someone deploys elsew
 Timezone handling is covered by tests against New York (DST), Asia/Kolkata (`+05:30`),
 Berlin, and UTC.
 
-See [relay/.env.example](relay/.env.example) for everything else. Legacy `BSRL_*` names
+See [relay/example.env](relay/example.env) for everything else. Legacy `BSRL_*` names
 are still honoured as a fallback.
 
 Two caveats for a new site: the TLS workaround below is pinned to hostnames under
