@@ -69,6 +69,7 @@ export interface AvailabilityResult {
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "relayUrl";
+const DEFAULT_RELAY_URL = "http://localhost:8787";
 
 /**
  * The relay lives on the building's network, so its address differs per
@@ -78,8 +79,14 @@ const STORAGE_KEY = "relayUrl";
 export function getRelayUrl(): string {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored && stored.trim()) return stored.trim().replace(/\/+$/, "");
+
+  // Truthiness, not `??`. CI passes VITE_RELAY_URL through from a repo variable
+  // that is usually unset, which arrives as an empty string rather than
+  // undefined — and `?? ` would happily accept "", making every request
+  // relative to the page's own origin and 404 against GitHub Pages.
   const fromEnv = import.meta.env.VITE_RELAY_URL as string | undefined;
-  return (fromEnv ?? "http://localhost:8787").replace(/\/+$/, "");
+  const base = fromEnv && fromEnv.trim() ? fromEnv.trim() : DEFAULT_RELAY_URL;
+  return base.replace(/\/+$/, "");
 }
 
 export function setRelayUrl(url: string): void {

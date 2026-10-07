@@ -40,9 +40,13 @@ jobs:
         # here could work for everyone. The app falls back to localhost and the
         # address is changeable at runtime from the Relay panel. Set the repo
         # variable RELAY_URL if your deployment has a stable public hostname.
+        run: |
+          # Only export the variable when it is actually set; an empty value
+          # would otherwise override the built-in localhost default.
+          if [ -n "${RELAY_URL}" ]; then export VITE_RELAY_URL="${RELAY_URL}"; fi
+          npm run build --workspace web
         env:
-          VITE_RELAY_URL: ${{ vars.RELAY_URL }}
-        run: npm run build --workspace web
+          RELAY_URL: ${{ vars.RELAY_URL }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
