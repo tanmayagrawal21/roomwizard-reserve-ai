@@ -91,11 +91,33 @@ docker run -p 8787:8787 --env-file relay/.env rw-relay
 `.github/workflows/pages.yml` publishes `web/` to GitHub Pages on push to `main`. Enable
 Pages for the repo with **Source: GitHub Actions** first.
 
-Two things to know. Add the Pages origin to `RW_ALLOWED_ORIGINS` on the relay, or the
-browser will refuse the requests. And a hosted HTTPS page calling a relay on
-`http://localhost` works in Chrome and Firefox, which treat localhost as a trustworthy
-origin, but Safari is stricter — for a shared deployment give the relay a real hostname
-with a valid certificate and set the repo variable `RELAY_URL`.
+Add the Pages origin to `RW_ALLOWED_ORIGINS` on the relay (scheme and host only), or
+the browser refuses the responses.
+
+**The hosted page cannot reliably reach a relay on `http://localhost`.** Chrome gates
+requests from a public page into the loopback address space behind Local Network Access:
+
+```
+Access to fetch at 'http://localhost:8787/api/rooms' from origin
+'https://you.github.io' has been blocked by CORS policy: Permission was denied
+for this request to access the `loopback` address space.
+```
+
+The relay opts in on the preflight (`Access-Control-Allow-Local-Network`, plus the older
+`...-Private-Network` spelling), but that is only half of it — the browser also requires
+the user to grant a permission prompt, and other browsers take their own positions.
+
+So, in practice:
+
+- **For yourself**, run the UI locally with `npm run dev:web`. Localhost to localhost is
+  not gated, and this is the path that is actually verified working.
+- **For a shared deployment**, give the relay a real hostname with a valid certificate
+  on the building's network and set the repo variable `RELAY_URL`. A public DNS A record
+  pointing at a private address works fine with a Let's Encrypt DNS-01 certificate — it
+  is what the appliances themselves do.
+
+The Pages deployment is still useful as the canonical build and for anyone who has
+configured a proper relay address.
 
 ## What the UI does
 

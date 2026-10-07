@@ -26,6 +26,36 @@ export function createApp() {
   const app = new Hono();
 
   app.use("*", logger());
+
+  /**
+   * Local Network Access opt-in.
+   *
+   * Chrome gates requests from a public page into the loopback/local address
+   * space: a hosted UI fetching http://localhost:8787 is refused with
+   * "Permission was denied for this request to access the `loopback` address
+   * space" unless the target opts in on the preflight. Firefox and Safari have
+   * their own stances, so this is best-effort.
+   *
+   * Both header spellings are sent because the header was renamed mid-rollout
+   * (Private Network Access -> Local Network Access) and which one a given
+   * Chrome build looks for depends on its version.
+   *
+   * This is only half the story: the browser also requires the user to grant a
+   * permission prompt. A shared deployment should give the relay a real
+   * hostname with a valid certificate rather than relying on this.
+   */
+  app.use("/api/*", async (c, next) => {
+    await next();
+    if (c.req.method !== "OPTIONS") return;
+    const asked =
+      c.req.header("access-control-request-private-network") ??
+      c.req.header("access-control-request-local-network");
+    if (asked === "true") {
+      c.header("Access-Control-Allow-Private-Network", "true");
+      c.header("Access-Control-Allow-Local-Network", "true");
+    }
+  });
+
   app.use(
     "/api/*",
     cors({
