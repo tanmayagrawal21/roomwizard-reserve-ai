@@ -16,21 +16,22 @@ the build plan.
 
 ## Status
 
-**Phases 1-2 complete** — the relay and a read-only picker UI, both verified against the
-live BSRL fleet.
+**Phases 1-3 complete** — the relay (reads and writes) and a picker UI, verified against
+the live BSRL fleet including a real create → verify → cancel → verify round trip.
 
 | Phase | What | State |
 |---|---|---|
 | 0 | Validate the appliance write path | ✅ verified live |
 | 1 | Relay: roster + availability | ✅ done, 79 tests |
 | 2 | Picker UI | ✅ done |
-| 3 | Booking (writes) | next |
-| 4 | Slot finder | — |
+| 3 | Relay: create + cancel bookings | ✅ done, 105 tests, verified live |
+| 4 | Slot finder | next |
 | 5 | Chat (local Qwen via Ollama) | — |
 
-Booking is not wired up yet, so the UI is currently read-only: you can see every room's
-day at a glance and filter down to the ones that suit, but you still reserve through the
-appliance's own page.
+The relay can create and cancel bookings end to end — this has been exercised against the
+real appliances, not just typechecked. The picker UI does not yet have a booking form
+wired up to it (that's the remaining Phase 3/4 UI work), so for now the fastest way to use
+writes is the API directly, documented below.
 
 ## Why there is a relay
 
@@ -134,6 +135,9 @@ Rooms whose appliance didn't answer are shown as "couldn't read this room's sche
 rather than as empty — "free" and "unknown" are different claims and the UI shouldn't
 conflate them.
 
+Booking itself (the `POST`/`DELETE` below) is implemented and verified live, but the
+picker doesn't have a "book this slot" button wired up to it yet.
+
 ## Relay API
 
 ### `GET /healthz`
@@ -175,6 +179,41 @@ showing as empty, so the UI can tell "nothing booked" from "we don't know".
 
 All timestamps are ISO 8601 with an explicit offset, computed per instant — so zones that
 observe DST are handled correctly even though BSRL's does not.
+
+### `POST /api/book`
+
+```json
+{
+  "roomId": "bsrl-258",
+  "start": "2026-10-08T14:00:00",
+  "end": "2026-10-08T15:00:00",
+  "purpose": "Lab meeting",
+  "hostFirstName": "Sam",
+  "hostLastName": "Rivera",
+  "password": "optional — the relay generates a strong one if omitted"
+}
+```
+
+Matches what the appliance actually requires (PLAN.md section 2): `purpose`, at least one
+of `hostFirstName`/`hostLastName`, and a start/end inside the fleet's bookable hours.
+Everything the real booking form also supports — recurrence, invitees, cost centers,
+confidential — is out of scope here.
+
+Before writing, the relay re-checks the room's live bookings for a conflict (`409` if the
+slot was just taken) and re-reads the room after a successful write to hand back a real
+booking id (`201`) — the appliance's own success response is a bare redirect with no id in
+it. The response includes the booking's password **exactly once**; the relay is stateless
+and does not keep it, so the caller must hold onto it to cancel later.
+
+### `DELETE /api/booking/:roomId/:id`
+
+```json
+{ "password": "whatever POST /api/book returned" }
+```
+
+`404` if no such booking exists on that room, `403` if the password is wrong. Both are
+verified live: a wrong password leaves the booking untouched; the correct one removes it
+and the relay's own `/api/availability` reflects that on the next call.
 
 ## Other installations
 

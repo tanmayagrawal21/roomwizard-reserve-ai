@@ -167,3 +167,8 @@ export async function getFleet(on: Instant): Promise<Fleet> {
 export function invalidateFleet(): void {
   fleetCache.invalidate("fleet");
 }
+
+/** Find a room by id in a fleet, or null if it doesn't exist / isn't online. */
+export function findRoom(fleet: Fleet, roomId: string): Room | null {
+  return fleet.rooms.find((r) => r.id === roomId) ?? null;
+}
