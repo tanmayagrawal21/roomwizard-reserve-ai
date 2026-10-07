@@ -1,0 +1,18 @@
+{
+  "name": "roomwizard-reserve-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-assisted room booking front-end for Steelcase RoomWizard systems",
+  "workspaces": [
+    "relay"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace relay",
+    "build": "npm run build --workspace relay",
+    "test": "npm run test --workspace relay",
+    "typecheck": "npm run typecheck --workspace relay"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

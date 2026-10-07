@@ -1,0 +1,65 @@
+{
+  "currentTime": "2026/10/08 09:15:00",
+  "currentTimeInDaylight": false,
+  "defaultBookingLength": 15,
+  "isScheduleGrpView": "",
+  "timezoneOffset": -420,
+  "timeFormat": "12",
+  "groups": [
+    { "name": "BSRL-203", "selected": true, "url": "https://bsrl-203.arizona.edu/" }
+  ],
+  "buddyList": [
+    {
+      "sortName": "bsrl-100-https://bsrl-100.arizona.edu/",
+      "isAlwaysInUse": false,
+      "isClassicMode": true,
+      "isPrivateRoom": false,
+      "roomName": "BSRL-100",
+      "capacity": 8,
+      "success": true,
+      "host": "https://bsrl-100.arizona.edu/",
+      "location": "1st floor South near elevator",
+      "facilities": "Integrated Pan Tilt Zoom Camera for Video Conferencing.\n\nIn-room Windows 10 PC with wireless keyboard and mouse\n"
+    },
+    {
+      "sortName": "bsrl-258-https://bsrl-258.arizona.edu/",
+      "isAlwaysInUse": false,
+      "isClassicMode": true,
+      "isPrivateRoom": false,
+      "roomName": "BSRL-258",
+      "capacity": 10,
+      "success": true,
+      "host": "https://bsrl-258.arizona.edu/",
+      "location": "Second floor North Large room",
+      "facilities": "Integrated PTZ Camera for Video Conferencing.\nCisco-IP Based Video conferencing\nAudio Conferencing.\nIn-room Windows 10 PC\n"
+    },
+    {
+      "sortName": "bsrl-340-https://bsrl-340.arizona.edu/",
+      "isAlwaysInUse": false,
+      "isClassicMode": true,
+      "isPrivateRoom": false,
+      "roomName": "BSRL-340",
+      "capacity": 8,
+      "success": true,
+      "host": "https://bsrl-340.arizona.edu/",
+      "location": "3rd Floor North",
+      "facilities": ""
+    },
+    {
+      "sortName": "bsrl-450-https://bsrl-450.arizona.edu/",
+      "isAlwaysInUse": false,
+      "isClassicMode": true,
+      "isPrivateRoom": false,
+      "roomName": "BSRL-450",
+      "capacity": 10,
+      "success": false,
+      "host": "https://bsrl-450.arizona.edu/",
+      "location": "",
+      "facilities": ""
+    }
+  ],
+  "linkToOtherGroup": [],
+  "timelineLables": [],
+  "timelineStart": "07",
+  "timelineEnd": "19"
+}
