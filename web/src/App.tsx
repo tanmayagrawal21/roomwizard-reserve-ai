@@ -1,18 +1,22 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAvailability,
   fetchFleet,
   getRelayUrl,
   RelayError,
   type AvailabilityResult,
+  type Room,
 } from "./api";
+import { BookingModal } from "./components/BookingModal";
 import { FilterBar } from "./components/FilterBar";
+import { MyBookingsPanel } from "./components/MyBookingsPanel";
 import { RelaySettings } from "./components/RelaySettings";
 import { RoomErrorRow, RoomRow } from "./components/RoomRow";
 import { HourAxis } from "./components/Timeline";
 import { WeekStrip } from "./components/WeekStrip";
 import { dayUtilization, EMPTY_FILTERS, matchesFilters, type Filters } from "./lib/filters";
+import { listMyBookings, pruneExpired, type TrackedBooking } from "./lib/myBookings";
 import {
   addDaysToDate,
   formatDateLabel,
@@ -24,11 +28,27 @@ import {
 const WINDOW_DAYS = 7;
 
 export default function App() {
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMyBookings, setShowMyBookings] = useState(false);
+  const [selection, setSelection] = useState<{ room: Room; minute: number } | null>(null);
+  const [myBookings, setMyBookings] = useState<TrackedBooking[]>(() => listMyBookings());
   /** Monday-agnostic: the window simply starts at the anchor date. */
   const [anchor, setAnchor] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    pruneExpired(new Date().toISOString());
+    setMyBookings(listMyBookings());
+  }, []);
+
+  function afterBookingChange() {
+    setMyBookings(listMyBookings());
+    // Both queries key off the same bookings; a create or cancel can affect
+    // either the currently-viewed window or the week strip's density bars.
+    void queryClient.invalidateQueries({ queryKey: ["availability"] });
+  }
 
   const fleetQuery = useQuery({
     queryKey: ["fleet", getRelayUrl()],
@@ -130,6 +150,13 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => setShowMyBookings(true)}
+            className="rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+          >
+            My bookings{myBookings.length > 0 ? ` (${myBookings.length})` : ""}
+          </button>
+          <button
+            type="button"
             onClick={() => setShowSettings(true)}
             className="rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           >
@@ -223,6 +250,12 @@ export default function App() {
                       dayEndHour={dayEndHour}
                       timeZone={timeZone}
                       nowMinutes={nowMinutes}
+                      slotMinutes={fleetMeta?.slotMinutes ?? 15}
+                      onSelectSlot={
+                        selectedDate && selectedDate >= today!
+                          ? (room, minute) => setSelection({ room, minute })
+                          : undefined
+                      }
                     />
                   ))}
                   {availabilityQuery.data?.errors.map((e) => (
@@ -241,6 +274,26 @@ export default function App() {
       )}
 
       {showSettings && <RelaySettings onClose={() => setShowSettings(false)} />}
+
+      {showMyBookings && (
+        <MyBookingsPanel
+          bookings={myBookings}
+          onClose={() => setShowMyBookings(false)}
+          onChanged={afterBookingChange}
+        />
+      )}
+
+      {selection && selectedDate && (
+        <BookingModal
+          room={selection.room}
+          date={selectedDate}
+          startMinute={selection.minute}
+          dayEndHour={dayEndHour}
+          slotMinutes={fleetMeta?.slotMinutes ?? 15}
+          onClose={() => setSelection(null)}
+          onBooked={afterBookingChange}
+        />
+      )}
     </div>
   );
 }

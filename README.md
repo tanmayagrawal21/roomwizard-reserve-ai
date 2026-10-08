@@ -16,22 +16,22 @@ the build plan.
 
 ## Status
 
-**Phases 1-3 complete** — the relay (reads and writes) and a picker UI, verified against
-the live BSRL fleet including a real create → verify → cancel → verify round trip.
+**Phases 1-3 complete** — relay, picker UI, and booking are all wired up end to end and
+verified against the live BSRL fleet, including driving the real browser UI through a
+create → verify → cancel → verify round trip.
 
 | Phase | What | State |
 |---|---|---|
 | 0 | Validate the appliance write path | ✅ verified live |
 | 1 | Relay: roster + availability | ✅ done, 79 tests |
 | 2 | Picker UI | ✅ done |
-| 3 | Relay: create + cancel bookings | ✅ done, 105 tests, verified live |
+| 3 | Create + cancel bookings, relay and UI | ✅ done, 113 tests, verified live end to end |
 | 4 | Slot finder | next |
 | 5 | Chat (local Qwen via Ollama) | — |
 
-The relay can create and cancel bookings end to end — this has been exercised against the
-real appliances, not just typechecked. The picker UI does not yet have a booking form
-wired up to it (that's the remaining Phase 3/4 UI work), so for now the fastest way to use
-writes is the API directly, documented below.
+You can book through the UI: click a free slot on any room's timeline, fill in what it's
+for and your name, and it's created on the real appliance. A "My bookings" panel (top
+right) lists everything this browser has booked, with a cancel button on each.
 
 ## Why there is a relay
 
@@ -73,7 +73,7 @@ To configure a non-BSRL installation, `cp relay/example.env relay/.env` and edit
 ### Checks
 
 ```bash
-npm test          # 79 relay tests, no network access needed
+npm test          # 113 tests (relay + web), no network access needed
 npm run typecheck
 npm run build
 ```
@@ -135,8 +135,11 @@ Rooms whose appliance didn't answer are shown as "couldn't read this room's sche
 rather than as empty — "free" and "unknown" are different claims and the UI shouldn't
 conflate them.
 
-Booking itself (the `POST`/`DELETE` below) is implemented and verified live, but the
-picker doesn't have a "book this slot" button wired up to it yet.
+Click a free slot (anywhere on the emerald background, not on an existing booking) to
+book it — a modal asks for a duration, what it's for, and your name, which it remembers
+for next time. Cancelling lives in **My bookings** (top right), scoped to whatever this
+browser has created; there's no login, so that's the only sense in which bookings are
+"yours". See the API section below for exactly what the relay does under the hood.
 
 ## Relay API
 

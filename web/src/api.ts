@@ -144,3 +144,65 @@ export const fetchAvailability = (from: string, days: number, signal?: AbortSign
     `/api/availability?from=${encodeURIComponent(from)}&days=${days}`,
     signal,
   );
+
+// ---------------------------------------------------------------------------
+// Writes
+// ---------------------------------------------------------------------------
+
+export interface CreateBookingInput {
+  roomId: string;
+  /** Naive local datetime, no offset — the relay resolves it in the fleet's own timezone. */
+  start: string;
+  end: string;
+  purpose: string;
+  hostFirstName: string;
+  hostLastName: string;
+}
+
+export interface CreatedBooking {
+  id: string;
+  roomId: string;
+  start: string;
+  end: string;
+  purpose: string;
+  /**
+   * Returned exactly once, on creation. The relay is stateless and does not
+   * keep it — this is the only chance to capture it for a later cancellation,
+   * which is why createBooking persists it to local storage immediately.
+   */
+  password: string;
+}
+
+async function send<T>(method: "POST" | "DELETE", path: string, body: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${getRelayUrl()}${path}`, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new RelayError(`Can't reach the relay at ${getRelayUrl()}`, 0, true);
+  }
+
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = await res.json();
+  } catch {
+    // A non-JSON body on failure just means we fall through to the status line.
+  }
+
+  if (!res.ok) {
+    const error = typeof payload.error === "string" ? payload.error : `HTTP ${res.status}`;
+    throw new RelayError(error, res.status);
+  }
+  return payload as T;
+}
+
+export const createBooking = (input: CreateBookingInput) =>
+  send<CreatedBooking>("POST", "/api/book", input);
+
+export const cancelBooking = (roomId: string, bookingId: string, password: string) =>
+  send<{ ok: true }>("DELETE", `/api/booking/${encodeURIComponent(roomId)}/${encodeURIComponent(bookingId)}`, {
+    password,
+  });

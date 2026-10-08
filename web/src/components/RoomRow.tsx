@@ -1,4 +1,4 @@
-import type { RoomAvailability } from "../api";
+import type { Room, RoomAvailability } from "../api";
 import { AMENITY_LABELS, longestFreeMinutes } from "../lib/filters";
 import { formatDuration, formatTime } from "../lib/time";
 import { Timeline } from "./Timeline";
@@ -9,6 +9,8 @@ interface Props {
   dayEndHour: number;
   timeZone: string;
   nowMinutes: number | null;
+  slotMinutes: number;
+  onSelectSlot?: (room: Room, minute: number) => void;
 }
 
 const AMENITY_ICON: Record<string, string> = {
@@ -18,7 +20,15 @@ const AMENITY_ICON: Record<string, string> = {
   audio_conf: "Audio",
 };
 
-export function RoomRow({ entry, dayStartHour, dayEndHour, timeZone, nowMinutes }: Props) {
+export function RoomRow({
+  entry,
+  dayStartHour,
+  dayEndHour,
+  timeZone,
+  nowMinutes,
+  slotMinutes,
+  onSelectSlot,
+}: Props) {
   const { room } = entry;
   const longest = longestFreeMinutes(entry);
   const fullyFree = entry.busy.length === 0;
@@ -63,6 +73,12 @@ export function RoomRow({ entry, dayStartHour, dayEndHour, timeZone, nowMinutes 
           dayEndHour={dayEndHour}
           timeZone={timeZone}
           nowMinutes={nowMinutes}
+          slotMinutes={slotMinutes}
+          onSelectMinute={
+            entry.room.online && onSelectSlot
+              ? (minute) => onSelectSlot(entry.room, minute)
+              : undefined
+          }
         />
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
           {fullyFree ? (

@@ -6,6 +6,11 @@
  * background, which inverts the original RoomWizard's emphasis: you are looking
  * for somewhere to be, so empty space should read as the opportunity, not the
  * absence of data.
+ *
+ * Clicking anywhere on the free background starts a booking there, snapped to
+ * the fleet's slot granularity. Clicking an existing booking does nothing —
+ * `stopPropagation` on each block is what makes that true, since the block
+ * sits on top of the same clickable container.
  */
 
 import type { Booking, RoomAvailability } from "../api";
@@ -18,15 +23,35 @@ interface Props {
   timeZone: string;
   /** Minutes from midnight, or null when not viewing today. */
   nowMinutes: number | null;
+  slotMinutes: number;
+  /** Minutes from local midnight, snapped to `slotMinutes`. Omitted if the room is read-only (e.g. offline). */
+  onSelectMinute?: (minute: number) => void;
 }
 
-export function Timeline({ entry, dayStartHour, dayEndHour, timeZone, nowMinutes }: Props) {
+export function Timeline({
+  entry,
+  dayStartHour,
+  dayEndHour,
+  timeZone,
+  nowMinutes,
+  slotMinutes,
+  onSelectMinute,
+}: Props) {
   const windowStart = dayStartHour * 60;
   const windowEnd = dayEndHour * 60;
   const span = windowEnd - windowStart;
 
   const toPercent = (minutes: number) =>
     ((Math.min(Math.max(minutes, windowStart), windowEnd) - windowStart) / span) * 100;
+
+  const handleTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onSelectMinute) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const fraction = (e.clientX - rect.left) / rect.width;
+    const raw = windowStart + fraction * span;
+    const snapped = Math.round(raw / slotMinutes) * slotMinutes;
+    onSelectMinute(Math.min(Math.max(snapped, windowStart), windowEnd - slotMinutes));
+  };
 
   const blockFor = (b: Booking) => {
     // A booking may start before or end after the bookable window; clamping
@@ -41,7 +66,14 @@ export function Timeline({ entry, dayStartHour, dayEndHour, timeZone, nowMinutes
   };
 
   return (
-    <div className="relative h-11 rounded-md bg-emerald-50 ring-1 ring-inset ring-emerald-200/70 dark:bg-emerald-950/40 dark:ring-emerald-900/60">
+    <div
+      onClick={handleTrackClick}
+      className={
+        "relative h-11 rounded-md bg-emerald-50 ring-1 ring-inset ring-emerald-200/70 dark:bg-emerald-950/40 dark:ring-emerald-900/60" +
+        (onSelectMinute ? " cursor-pointer hover:ring-emerald-400 dark:hover:ring-emerald-700" : "")
+      }
+      title={onSelectMinute ? "Click to book this time" : undefined}
+    >
       {/* Hour gridlines, so a block's position is readable without a tooltip. */}
       {Array.from({ length: dayEndHour - dayStartHour - 1 }, (_, i) => (
         <div
@@ -58,6 +90,7 @@ export function Timeline({ entry, dayStartHour, dayEndHour, timeZone, nowMinutes
         return (
           <div
             key={b.id}
+            onClick={(e) => e.stopPropagation()}
             className="group absolute top-0.5 bottom-0.5 overflow-hidden rounded bg-slate-500/90 px-1.5 ring-1 ring-inset ring-slate-600/40 transition-colors hover:bg-slate-600 dark:bg-slate-600/90 dark:hover:bg-slate-500"
             style={{ left: `${left}%`, width: `${width}%` }}
             title={`${label}${who}\n${formatTime(b.start, timeZone)} – ${formatTime(b.end, timeZone)} (${formatDuration(b.start, b.end)})`}

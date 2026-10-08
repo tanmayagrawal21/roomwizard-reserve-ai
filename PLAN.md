@@ -346,15 +346,17 @@ my-bookings. Re-validate availability relay-side immediately before writing: the
 read→write gap is a real double-book risk, and RoomWizard will happily let two people
 claim the same slot.
 
-**Phase 3 — booking.** ✅ Done. `POST /api/book` and `DELETE /api/booking/:roomId/:id`
-implement the appliance's actual create/cancel flow (session cookie through
-`BookingForm.action` → `saveBooking.action`, and the `validateBookingPassword.action` →
-`populateDelete.action` → `deleteBooking.action` chain for cancellation). Re-checks
-availability immediately before writing and re-reads the room afterward to recover a
-booking id, since the appliance's own success response is a bare redirect. Verified
-against the live fleet: create → confirm on the appliance directly → cancel → confirm
-gone, plus the wrong-password and conflict paths. The picker UI does not yet call this —
-that UI wiring is what remains of this phase.
+**Phase 3 — booking.** ✅ Done, relay and UI. `POST /api/book` and
+`DELETE /api/booking/:roomId/:id` implement the appliance's actual create/cancel flow
+(session cookie through `BookingForm.action` → `saveBooking.action`, and the
+`validateBookingPassword.action` → `populateDelete.action` → `deleteBooking.action` chain
+for cancellation). Re-checks availability immediately before writing and re-reads the
+room afterward to recover a booking id, since the appliance's own success response is a
+bare redirect. The picker UI calls this directly: clicking a free slot opens a booking
+form; a localStorage-backed "My bookings" panel lists what this browser created and
+cancels it, since the relay itself never stores a booking's password (section 7). Verified
+by driving the real browser through click → book → confirm on the appliance → cancel via
+the panel → confirm gone, not just through the API.
 
 **Phase 4 — slot finder.** Deterministic ranking (`find_slots`). Useful on its own, and
 the tool the model leans on hardest.
