@@ -6,9 +6,11 @@ import {
   getRelayUrl,
   RelayError,
   type AvailabilityResult,
+  type Booking,
   type Room,
 } from "./api";
 import { BookingModal } from "./components/BookingModal";
+import { BookingPreview } from "./components/BookingPreview";
 import { FilterBar } from "./components/FilterBar";
 import { MyBookingsPanel } from "./components/MyBookingsPanel";
 import { RelaySettings } from "./components/RelaySettings";
@@ -33,6 +35,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMyBookings, setShowMyBookings] = useState(false);
   const [selection, setSelection] = useState<{ room: Room; minute: number } | null>(null);
+  const [preview, setPreview] = useState<{ room: Room; booking: Booking } | null>(null);
   const [myBookings, setMyBookings] = useState<TrackedBooking[]>(() => listMyBookings());
   /** Monday-agnostic: the window simply starts at the anchor date. */
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -256,6 +259,7 @@ export default function App() {
                           ? (room, minute) => setSelection({ room, minute })
                           : undefined
                       }
+                      onPreviewBooking={(room, booking) => setPreview({ room, booking })}
                     />
                   ))}
                   {availabilityQuery.data?.errors.map((e) => (
@@ -292,6 +296,17 @@ export default function App() {
           slotMinutes={fleetMeta?.slotMinutes ?? 15}
           onClose={() => setSelection(null)}
           onBooked={afterBookingChange}
+        />
+      )}
+
+      {preview && (
+        <BookingPreview
+          room={preview.room}
+          booking={preview.booking}
+          timeZone={timeZone}
+          dayEndHour={dayEndHour}
+          onClose={() => setPreview(null)}
+          onChanged={afterBookingChange}
         />
       )}
     </div>

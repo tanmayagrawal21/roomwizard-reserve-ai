@@ -341,22 +341,41 @@ wherever the box ends up.
 room detail. Relay URL from build config, overridable in settings. Ship it — already
 better than the current site with zero write capability.
 
-**Phase 3 — booking.** `POST /api/book`, drag-to-select, confirm modal, saved profile,
-my-bookings. Re-validate availability relay-side immediately before writing: the
-read→write gap is a real double-book risk, and RoomWizard will happily let two people
-claim the same slot.
+**Phase 3 — booking.** ✅ Done, relay and UI: create, edit, and cancel.
 
-**Phase 3 — booking.** ✅ Done, relay and UI. `POST /api/book` and
-`DELETE /api/booking/:roomId/:id` implement the appliance's actual create/cancel flow
-(session cookie through `BookingForm.action` → `saveBooking.action`, and the
-`validateBookingPassword.action` → `populateDelete.action` → `deleteBooking.action` chain
-for cancellation). Re-checks availability immediately before writing and re-reads the
-room afterward to recover a booking id, since the appliance's own success response is a
-bare redirect. The picker UI calls this directly: clicking a free slot opens a booking
-form; a localStorage-backed "My bookings" panel lists what this browser created and
-cancels it, since the relay itself never stores a booking's password (section 7). Verified
-by driving the real browser through click → book → confirm on the appliance → cancel via
-the panel → confirm gone, not just through the API.
+Relay: `POST /api/book`, `POST /api/booking/:roomId/:id/unlock`,
+`PUT /api/booking/:roomId/:id`, `DELETE /api/booking/:roomId/:id`. These implement the
+appliance's actual flows (section 2) — session cookie through `BookingForm.action` →
+`saveBooking.action` for create; `validateBookingPassword.action` → `updateBooking.action`
+for edit; `validateBookingPassword.action` → `populateDelete.action` →
+`deleteBooking.action` for cancel. Create re-checks availability immediately before
+writing and re-reads the room afterward to recover a booking id, since the appliance's
+own success response is a bare redirect with no id in it. Edit re-checks for a conflict
+against the room's *other* bookings, excluding itself.
+
+A real appliance quirk surfaced only by driving the actual UI, not by calling the API
+directly: a validate-then-update sequence can get back an accepted redirect while leaving
+the booking completely unchanged, apparently when something else (the picker's own
+background availability refetch) is concurrently hitting the same appliance. Not
+something this relay can fix on the appliance's side, so it doesn't trust the redirect —
+`updateBooking` and `cancelBooking` both re-read and compare after writing, retrying the
+whole sequence once before reporting failure.
+
+The picker UI calls all of this directly. Clicking a free slot opens a create form.
+Clicking an *existing* booking opens a preview — purpose, host, email if one was given,
+same visibility the appliance's own schedule already has — with an Edit button whose
+lock icon depends on whether *this browser* already has a password for that booking, not
+on who created it: there's no login, so "mine" can only ever mean "remembered locally".
+Edit without a known password prompts for one, with an option to remember it afterward.
+Cancelling lives inside that same unlocked edit view rather than a separate form, since
+both actions need the identical proof. A localStorage-backed "My bookings" panel lists
+whatever is currently remembered.
+
+Verified by driving the real browser through full round trips in both directions: create
+→ confirm on the appliance → edit → confirm the change landed (through the retry) →
+cancel → confirm gone; and, separately, previewing a booking this browser doesn't
+recognize → rejecting a wrong password → accepting the right one → confirming it's now
+remembered → editing and cancelling it like any other.
 
 **Phase 4 — slot finder.** Deterministic ranking (`find_slots`). Useful on its own, and
 the tool the model leans on hardest.

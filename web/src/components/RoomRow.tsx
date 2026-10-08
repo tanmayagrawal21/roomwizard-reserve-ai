@@ -1,4 +1,4 @@
-import type { Room, RoomAvailability } from "../api";
+import type { Booking, Room, RoomAvailability } from "../api";
 import { AMENITY_LABELS, longestFreeMinutes } from "../lib/filters";
 import { formatDuration, formatTime } from "../lib/time";
 import { Timeline } from "./Timeline";
@@ -11,6 +11,7 @@ interface Props {
   nowMinutes: number | null;
   slotMinutes: number;
   onSelectSlot?: (room: Room, minute: number) => void;
+  onPreviewBooking?: (room: Room, booking: Booking) => void;
 }
 
 const AMENITY_ICON: Record<string, string> = {
@@ -28,6 +29,7 @@ export function RoomRow({
   nowMinutes,
   slotMinutes,
   onSelectSlot,
+  onPreviewBooking,
 }: Props) {
   const { room } = entry;
   const longest = longestFreeMinutes(entry);
@@ -78,6 +80,9 @@ export function RoomRow({
             entry.room.online && onSelectSlot
               ? (minute) => onSelectSlot(entry.room, minute)
               : undefined
+          }
+          onPreviewBooking={
+            onPreviewBooking ? (booking) => onPreviewBooking(entry.room, booking) : undefined
           }
         />
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">

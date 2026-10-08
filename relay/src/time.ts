@@ -182,6 +182,28 @@ export function toFormDateParts(
   return { day: pad(p.day), yearMonth: `${pad(p.year, 4)}${pad(p.month)}` };
 }
 
+/**
+ * The reverse of `toFormDateParts` plus a time: reconstructs an instant from
+ * the exact selects a validated BookingForm.action renders
+ * (`startDate`="07", `startMonth`="202610", `startTime`="140000"). Used to
+ * recover a booking's real start/end once its password has been proven,
+ * since that's the only place those three pieces come back together.
+ */
+export function fromFormDateParts(
+  day: string,
+  yearMonth: string,
+  time: string,
+  timeZone: string = TIMEZONE,
+): Instant {
+  const year = Number(yearMonth.slice(0, 4));
+  const month = Number(yearMonth.slice(4, 6));
+  const d = Number(day);
+  const hour = Number(time.slice(0, 2));
+  const minute = Number(time.slice(2, 4));
+  const second = Number(time.slice(4, 6));
+  return fromLocalParts(year, month, d, hour, minute, second, timeZone);
+}
+
 // ---------------------------------------------------------------------------
 // Relay -> client
 // ---------------------------------------------------------------------------

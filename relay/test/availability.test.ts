@@ -41,6 +41,20 @@ describe("normalizeBooking", () => {
     expect(timed[0]!.booking.host).toBe("Sam Rivera");
   });
 
+  it("exposes an empty hostEmail as null", () => {
+    // The fixture's bookings all have hostEmail: "" -- most bookings on this
+    // appliance don't carry an email at all, since the field is optional.
+    expect(timed[0]!.booking.hostEmail).toBeNull();
+  });
+
+  it("exposes a real hostEmail when the appliance has one", () => {
+    const withEmail = normalizeBooking(
+      { ...raw[0]!, hostEmail: "sam@example.edu" },
+      "bsrl-258",
+    );
+    expect(withEmail?.booking.hostEmail).toBe("sam@example.edu");
+  });
+
   it("withholds subject and host for a confidential booking but keeps the time", () => {
     const b = timed.find((t) => t.booking.id === "9002")!.booking;
     expect(b.isConfidential).toBe(true);
@@ -48,6 +62,14 @@ describe("normalizeBooking", () => {
     expect(b.host).toBeNull();
     // The slot is still blocked, which is the part availability depends on.
     expect(b.start).toBe("2026-10-08T13:00:00-07:00");
+  });
+
+  it("withholds hostEmail under the same confidentiality rule as purpose/host", () => {
+    const confidential = normalizeBooking(
+      { ...raw.find((b) => b.Id === "9002")!, hostEmail: "ada@example.edu" },
+      "bsrl-258",
+    );
+    expect(confidential?.booking.hostEmail).toBeNull();
   });
 
   it("drops a booking whose timestamps cannot be parsed", () => {

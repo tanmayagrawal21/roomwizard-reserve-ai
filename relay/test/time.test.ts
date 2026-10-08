@@ -3,6 +3,7 @@ import {
   addDays,
   atLocalTime,
   eachLocalDay,
+  fromFormDateParts,
   fromLocalParts,
   parseApplianceTimestamp,
   parseClientDateTime,
@@ -43,6 +44,20 @@ describe("relay -> appliance formats", () => {
 
   it("splits dates for the BookingForm selects", () => {
     expect(toFormDateParts(noon)).toEqual({ day: "07", yearMonth: "202610" });
+  });
+
+  it("reconstructs an instant from the split form fields (fromFormDateParts)", () => {
+    // This is the reverse of toFormDateParts + toApplianceTime, used to
+    // recover a booking's real time once its password has been validated.
+    const rebuilt = fromFormDateParts("07", "202610", "123015");
+    expect(rebuilt.getTime()).toBe(noon.getTime());
+  });
+
+  it("round-trips toFormDateParts -> fromFormDateParts for an arbitrary instant", () => {
+    const original = fromLocalParts(2026, 11, 3, 9, 15, 0);
+    const parts = toFormDateParts(original);
+    const rebuilt = fromFormDateParts(parts.day, parts.yearMonth, toApplianceTime(original));
+    expect(rebuilt.getTime()).toBe(original.getTime());
   });
 
   it("renders a midnight range end as the next day at 000000", () => {

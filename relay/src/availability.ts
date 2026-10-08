@@ -34,6 +34,12 @@ export interface Booking {
   /** Null when the booking is confidential — the appliance hides the subject. */
   purpose: string | null;
   host: string | null;
+  /**
+   * Optional — the appliance only has this if the booking's creator chose to
+   * give one (there is no account system to source it from). Hidden under
+   * the same rule as `purpose`/`host` when the booking is confidential.
+   */
+  hostEmail: string | null;
   isConfidential: boolean;
   createdAt: string | null;
 }
@@ -111,6 +117,7 @@ export function normalizeBooking(raw: RawBooking, roomId: string): TimedBooking 
       end: toIso(end),
       purpose: hidden ? null : (raw.purpose ?? "").trim() || null,
       host: hidden ? null : host || null,
+      hostEmail: hidden ? null : (raw.hostEmail ?? "").trim() || null,
       isConfidential: hidden,
       createdAt,
     },

@@ -26,6 +26,8 @@ interface Props {
   slotMinutes: number;
   /** Minutes from local midnight, snapped to `slotMinutes`. Omitted if the room is read-only (e.g. offline). */
   onSelectMinute?: (minute: number) => void;
+  /** Opens a detail view for an existing booking. */
+  onPreviewBooking?: (booking: Booking) => void;
 }
 
 export function Timeline({
@@ -36,6 +38,7 @@ export function Timeline({
   nowMinutes,
   slotMinutes,
   onSelectMinute,
+  onPreviewBooking,
 }: Props) {
   const windowStart = dayStartHour * 60;
   const windowEnd = dayEndHour * 60;
@@ -90,10 +93,19 @@ export function Timeline({
         return (
           <div
             key={b.id}
-            onClick={(e) => e.stopPropagation()}
-            className="group absolute top-0.5 bottom-0.5 overflow-hidden rounded bg-slate-500/90 px-1.5 ring-1 ring-inset ring-slate-600/40 transition-colors hover:bg-slate-600 dark:bg-slate-600/90 dark:hover:bg-slate-500"
+            onClick={(e) => {
+              // Stop the click from falling through to the free-slot handler
+              // on the container underneath, which would otherwise try to
+              // start a new booking on top of this one.
+              e.stopPropagation();
+              onPreviewBooking?.(b);
+            }}
+            className={
+              "group absolute top-0.5 bottom-0.5 overflow-hidden rounded bg-slate-500/90 px-1.5 ring-1 ring-inset ring-slate-600/40 transition-colors hover:bg-slate-600 dark:bg-slate-600/90 dark:hover:bg-slate-500" +
+              (onPreviewBooking ? " cursor-pointer" : "")
+            }
             style={{ left: `${left}%`, width: `${width}%` }}
-            title={`${label}${who}\n${formatTime(b.start, timeZone)} – ${formatTime(b.end, timeZone)} (${formatDuration(b.start, b.end)})`}
+            title={`${label}${who}\n${formatTime(b.start, timeZone)} – ${formatTime(b.end, timeZone)} (${formatDuration(b.start, b.end)})${onPreviewBooking ? "\nClick for details" : ""}`}
           >
             <span className="block truncate pt-1.5 text-[11px] leading-none font-medium text-white/95">
               {label}

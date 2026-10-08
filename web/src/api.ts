@@ -41,6 +41,8 @@ export interface Booking {
   /** Null when the booking is confidential. */
   purpose: string | null;
   host: string | null;
+  /** Optional even when set — not every booking has one. Same visibility rule as purpose/host. */
+  hostEmail: string | null;
   isConfidential: boolean;
   createdAt: string | null;
 }
@@ -157,6 +159,8 @@ export interface CreateBookingInput {
   purpose: string;
   hostFirstName: string;
   hostLastName: string;
+  /** Optional. Visible to anyone who views this room's schedule — there's no login to hide it behind. */
+  hostEmail?: string;
 }
 
 export interface CreatedBooking {
@@ -173,7 +177,7 @@ export interface CreatedBooking {
   password: string;
 }
 
-async function send<T>(method: "POST" | "DELETE", path: string, body: unknown): Promise<T> {
+async function send<T>(method: "POST" | "PUT" | "DELETE", path: string, body: unknown): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${getRelayUrl()}${path}`, {
@@ -202,7 +206,42 @@ async function send<T>(method: "POST" | "DELETE", path: string, body: unknown): 
 export const createBooking = (input: CreateBookingInput) =>
   send<CreatedBooking>("POST", "/api/book", input);
 
+export interface UpdateBookingInput extends CreateBookingInput {
+  /** The booking's current password, proving the caller may edit it. */
+  currentPassword: string;
+}
+
+export const updateBooking = (roomId: string, bookingId: string, input: UpdateBookingInput) =>
+  send<{ ok: true }>(
+    "PUT",
+    `/api/booking/${encodeURIComponent(roomId)}/${encodeURIComponent(bookingId)}`,
+    input,
+  );
+
 export const cancelBooking = (roomId: string, bookingId: string, password: string) =>
   send<{ ok: true }>("DELETE", `/api/booking/${encodeURIComponent(roomId)}/${encodeURIComponent(bookingId)}`, {
     password,
   });
+
+export interface UnlockedBooking {
+  purpose: string;
+  hostFirstName: string;
+  hostLastName: string;
+  hostEmail: string;
+  start: string;
+  end: string;
+}
+
+/**
+ * Prove a booking's password and get back its real current fields. The
+ * appliance keeps these hidden from anyone who hasn't supplied the password,
+ * even on its own edit page — this is the only way to get an accurate
+ * starting point for editing, for a booking this browser already recognizes
+ * as its own just as much as one it doesn't.
+ */
+export const unlockBooking = (roomId: string, bookingId: string, password: string) =>
+  send<UnlockedBooking>(
+    "POST",
+    `/api/booking/${encodeURIComponent(roomId)}/${encodeURIComponent(bookingId)}/unlock`,
+    { password },
+  );

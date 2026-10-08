@@ -17,6 +17,8 @@ import { useState } from "react";
 import { createBooking, RelayError, type Room } from "../api";
 import { addMyBooking } from "../lib/myBookings";
 import { getProfile, saveProfile } from "../lib/profile";
+import { minuteTo12h, minuteToClock } from "../lib/time";
+import { BookingFields } from "./BookingFields";
 
 interface Props {
   room: Room;
@@ -28,22 +30,6 @@ interface Props {
   onClose: () => void;
   onBooked: () => void;
 }
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-function minuteToClock(minute: number): string {
-  return `${pad(Math.floor(minute / 60) % 24)}:${pad(minute % 60)}`;
-}
-
-function minuteTo12h(minute: number): string {
-  const h = Math.floor(minute / 60) % 24;
-  const m = minute % 60;
-  const suffix = h < 12 ? "am" : "pm";
-  const display = h % 12 === 0 ? 12 : h % 12;
-  return `${display}:${pad(m)} ${suffix}`;
-}
-
-const DURATIONS = [15, 30, 45, 60, 90, 120];
 
 export function BookingModal({
   room,
@@ -58,6 +44,7 @@ export function BookingModal({
   const [purpose, setPurpose] = useState("");
   const [firstName, setFirstName] = useState(profile.firstName);
   const [lastName, setLastName] = useState(profile.lastName);
+  const [email, setEmail] = useState(profile.email);
   const [duration, setDuration] = useState(
     Math.min(60, dayEndHour * 60 - startMinute) || slotMinutes,
   );
@@ -77,6 +64,7 @@ export function BookingModal({
     try {
       const start = `${date}T${minuteToClock(startMinute)}:00`;
       const end = `${date}T${minuteToClock(endMinute)}:00`;
+      const trimmedEmail = email.trim();
       const result = await createBooking({
         roomId: room.id,
         start,
@@ -84,8 +72,9 @@ export function BookingModal({
         purpose: purpose.trim(),
         hostFirstName: firstName.trim(),
         hostLastName: lastName.trim(),
+        hostEmail: trimmedEmail || undefined,
       });
-      saveProfile({ firstName: firstName.trim(), lastName: lastName.trim() });
+      saveProfile({ firstName: firstName.trim(), lastName: lastName.trim(), email: trimmedEmail });
       addMyBooking({
         id: result.id,
         roomId: result.roomId,
@@ -125,73 +114,20 @@ export function BookingModal({
               {minuteTo12h(startMinute)} &ndash; {minuteTo12h(endMinute)}
             </p>
 
-            <label className="mt-3 block text-xs font-medium text-slate-600 dark:text-slate-300">
-              Duration
-            </label>
-            <div className="mt-1 flex flex-wrap gap-1">
-              {DURATIONS.filter((d) => d <= maxDuration).map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setDuration(d)}
-                  aria-pressed={duration === d}
-                  className={
-                    "rounded-full px-2 py-0.5 text-xs font-medium transition-colors " +
-                    (duration === d
-                      ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700")
-                  }
-                >
-                  {d < 60 ? `${d}m` : d % 60 === 0 ? `${d / 60}h` : `${Math.floor(d / 60)}h${d % 60}m`}
-                </button>
-              ))}
-            </div>
-
-            <label className="mt-3 block text-xs font-medium text-slate-600 dark:text-slate-300">
-              What's this for?
-            </label>
-            <input
-              type="text"
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              maxLength={50}
-              autoFocus
-              placeholder="Lab meeting"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:border-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            <BookingFields
+              purpose={purpose}
+              onPurposeChange={setPurpose}
+              firstName={firstName}
+              onFirstNameChange={setFirstName}
+              lastName={lastName}
+              onLastNameChange={setLastName}
+              email={email}
+              onEmailChange={setEmail}
+              duration={duration}
+              onDurationChange={setDuration}
+              maxDuration={maxDuration}
+              error={error}
             />
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-                  First name
-                </label>
-                <input
-                  type="text"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  maxLength={50}
-                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:border-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-                  Last name
-                </label>
-                <input
-                  type="text"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  maxLength={50}
-                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:border-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-                />
-              </div>
-            </div>
-
-            {error && (
-              <p className="mt-3 rounded-md bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700 ring-1 ring-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-900">
-                {error}
-              </p>
-            )}
 
             <div className="mt-4 flex justify-end gap-2">
               <button

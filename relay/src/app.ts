@@ -26,8 +26,18 @@ import {
   cancelBooking,
   createBooking,
   generateBookingPassword,
+  updateBooking,
+  validateBookingAccess,
 } from "./booking.ts";
-import { addDays, localParts, parseClientDateTime, startOfLocalDay, toIso } from "./time.ts";
+import { ApplianceSession } from "./session.ts";
+import {
+  addDays,
+  fromFormDateParts,
+  localParts,
+  parseClientDateTime,
+  startOfLocalDay,
+  toIso,
+} from "./time.ts";
 
 const rangeQuery = z.object({
   from: z.string().optional(),
@@ -43,12 +53,28 @@ const bookRequest = z.object({
   purpose: z.string().trim().min(1).max(50),
   hostFirstName: z.string().trim().max(50).optional().default(""),
   hostLastName: z.string().trim().max(50).optional().default(""),
+  /**
+   * Optional, and genuinely public once set — any unauthenticated caller can
+   * already read every booking's purpose and host name, and this is no
+   * different (verified live that the appliance persists and echoes it back).
+   * An empty string means "not provided", same as omitting it.
+   */
+  hostEmail: z.union([z.string().trim().email(), z.literal("")]).optional(),
   /** Caller-supplied password, or the relay generates one — see `generateBookingPassword`. */
   password: z.string().min(4).max(64).optional(),
 });
 
 const cancelRequest = z.object({
   password: z.string().min(1),
+});
+
+const unlockRequest = z.object({
+  password: z.string().min(1),
+});
+
+const updateRequest = bookRequest.extend({
+  /** The booking's current password, proving the caller may edit it. */
+  currentPassword: z.string().min(1),
 });
 
 /** Longest booking the relay will create in one call. Guards against a fat-fingered multi-day request reaching saveBooking.action. */
@@ -93,7 +119,7 @@ export function createApp() {
     "/api/*",
     cors({
       origin: (origin) => (ALLOWED_ORIGINS.includes(origin) ? origin : null),
-      allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowHeaders: ["content-type"],
       maxAge: 86_400,
     }),
@@ -234,6 +260,7 @@ export function createApp() {
         purpose: body.purpose,
         hostFirstName: body.hostFirstName,
         hostLastName: body.hostLastName,
+        hostEmail: body.hostEmail || undefined,
         password,
       });
       invalidateBookings();
@@ -241,6 +268,153 @@ export function createApp() {
     } catch (err) {
       if (err instanceof BookingRejectedError) {
         return c.json({ error: err.message }, 502);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * Prove a booking's password and get back its real current details.
+   *
+   * This is the only way to find out what a booking actually says: the
+   * appliance keeps purpose/name/email/time hidden from anyone who hasn't
+   * supplied the password, even on its own edit page (verified live). The
+   * edit UI calls this first — for a booking the browser already recognizes
+   * as its own just as much as for one it doesn't, since neither case has an
+   * accurate local copy of every field (the browser only ever persisted
+   * what the create form asked for, not an authoritative record).
+   */
+  app.post("/api/booking/:roomId/:id/unlock", async (c) => {
+    const roomId = c.req.param("roomId");
+    const id = c.req.param("id");
+    const json = await c.req.json().catch(() => null);
+    const parsed = unlockRequest.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "A `password` body is required" }, 400);
+    }
+
+    const fleet = await getFleet(new Date());
+    const room = findRoom(fleet, roomId);
+    if (!room) return c.json({ error: `No such room: ${roomId}` }, 404);
+
+    try {
+      const session = new ApplianceSession(room.host);
+      const fields = await validateBookingAccess(session, room, id, parsed.data.password);
+      const start = fromFormDateParts(fields.startDate!, fields.startMonth!, fields.startTime!);
+      const end = fromFormDateParts(fields.endDate!, fields.endMonth!, fields.endTime!);
+      return c.json({
+        purpose: fields.purpose ?? "",
+        hostFirstName: fields.hostFirstName ?? "",
+        hostLastName: fields.hostLastName ?? "",
+        hostEmail: fields.hostEmail ?? "",
+        start: toIso(start),
+        end: toIso(end),
+      });
+    } catch (err) {
+      if (err instanceof BookingValidationError) {
+        return c.json({ error: err.message }, 404);
+      }
+      if (err instanceof BookingRejectedError) {
+        return c.json({ error: err.message }, 403);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * Edit a booking. Requires its current password, same as cancelling — the
+   * appliance keeps everything about a booking hidden from anyone who hasn't
+   * proven they know it (verified live; see `booking.ts`).
+   */
+  app.put("/api/booking/:roomId/:id", async (c) => {
+    const roomId = c.req.param("roomId");
+    const id = c.req.param("id");
+    const json = await c.req.json().catch(() => null);
+    const parsed = updateRequest.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid request", details: parsed.error.flatten() }, 400);
+    }
+    const body = parsed.data;
+
+    if (!body.hostFirstName && !body.hostLastName) {
+      return c.json({ error: "hostFirstName or hostLastName is required" }, 400);
+    }
+
+    let start: Date;
+    let end: Date;
+    try {
+      start = parseClientDateTime(body.start);
+      end = parseClientDateTime(body.end);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+
+    const durationMinutes = (end.getTime() - start.getTime()) / 60_000;
+    if (durationMinutes < MIN_BOOKING_MINUTES) {
+      return c.json({ error: "`end` must be after `start`" }, 400);
+    }
+    if (durationMinutes > MAX_BOOKING_HOURS * 60) {
+      return c.json({ error: `Bookings longer than ${MAX_BOOKING_HOURS}h are not supported here` }, 400);
+    }
+
+    const fleet = await getFleet(start);
+    const room = findRoom(fleet, roomId);
+    if (!room) return c.json({ error: `No such room: ${roomId}` }, 404);
+    if (!room.online) {
+      return c.json({ error: `${room.name} is not responding right now` }, 502);
+    }
+
+    const startParts = localParts(start);
+    const endParts = localParts(end);
+    const startMin = startParts.hour * 60 + startParts.minute;
+    const endMin =
+      endParts.hour === 0 && endParts.minute === 0 && end.getTime() > start.getTime()
+        ? fleet.dayEndHour * 60
+        : endParts.hour * 60 + endParts.minute;
+    if (startMin < fleet.dayStartHour * 60 || endMin > fleet.dayEndHour * 60) {
+      return c.json(
+        { error: `${room.name} is only bookable ${fleet.dayStartHour}:00–${fleet.dayEndHour}:00` },
+        400,
+      );
+    }
+
+    // Conflict-check against the room's *other* bookings, excluding this one
+    // — otherwise a booking being moved by even a minute would always
+    // conflict with its own, unmodified, pre-edit self.
+    const rawExisting = await fetchBookings(room.host, start, end);
+    const conflict = rawExisting
+      .filter((b) => String(b.Id) !== id)
+      .map((b) => normalizeBooking(b, room.id))
+      .filter((b) => b !== null)
+      .some((b) => overlapsRange(b, start, end));
+    if (conflict) {
+      return c.json({ error: `${room.name} was just booked for part of that time` }, 409);
+    }
+
+    try {
+      await updateBooking({
+        room,
+        bookingId: id,
+        currentPassword: body.currentPassword,
+        start,
+        end,
+        purpose: body.purpose,
+        hostFirstName: body.hostFirstName,
+        hostLastName: body.hostLastName,
+        hostEmail: body.hostEmail || undefined,
+      });
+      invalidateBookings();
+      return c.json({ ok: true });
+    } catch (err) {
+      if (err instanceof BookingValidationError) {
+        return c.json({ error: err.message }, 404);
+      }
+      if (err instanceof BookingRejectedError) {
+        // Ambiguous between "wrong password" and "the appliance rejected the
+        // new details" -- validateBookingAccess throws the former with a
+        // message distinct enough ("Incorrect booking password") that a
+        // client can tell them apart if it wants to.
+        return c.json({ error: err.message }, 403);
       }
       throw err;
     }

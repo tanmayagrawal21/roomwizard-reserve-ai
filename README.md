@@ -16,22 +16,29 @@ the build plan.
 
 ## Status
 
-**Phases 1-3 complete** — relay, picker UI, and booking are all wired up end to end and
-verified against the live BSRL fleet, including driving the real browser UI through a
-create → verify → cancel → verify round trip.
+**Phases 1-3 complete** — relay, picker UI, and booking (create, edit, cancel) are all
+wired up end to end and verified against the live BSRL fleet, including driving the real
+browser UI through full create → edit → confirm → cancel → confirm round trips.
 
 | Phase | What | State |
 |---|---|---|
 | 0 | Validate the appliance write path | ✅ verified live |
 | 1 | Relay: roster + availability | ✅ done, 79 tests |
 | 2 | Picker UI | ✅ done |
-| 3 | Create + cancel bookings, relay and UI | ✅ done, 113 tests, verified live end to end |
+| 3 | Create, edit, cancel bookings, relay and UI | ✅ done, 118 tests, verified live end to end |
 | 4 | Slot finder | next |
 | 5 | Chat (local Qwen via Ollama) | — |
 
 You can book through the UI: click a free slot on any room's timeline, fill in what it's
-for and your name, and it's created on the real appliance. A "My bookings" panel (top
-right) lists everything this browser has booked, with a cancel button on each.
+for, your name, and optionally an email, and it's created on the real appliance.
+
+Click an **existing** booking to preview it — purpose, host, and email if one was given,
+same as the appliance's own public schedule shows anyone. From there, **Edit**: a plain
+"Edit" if this browser already knows the booking's password (it created it, or you've
+unlocked it before), or **"Edit 🔒"** if not — which prompts for the password and offers
+to remember it here afterward. Cancelling lives inside that same edit view, not a
+separate form, since both need the same proof of password. **My bookings** (top right) is
+just the list of what this browser currently remembers.
 
 ## Why there is a relay
 
@@ -136,10 +143,17 @@ rather than as empty — "free" and "unknown" are different claims and the UI sh
 conflate them.
 
 Click a free slot (anywhere on the emerald background, not on an existing booking) to
-book it — a modal asks for a duration, what it's for, and your name, which it remembers
-for next time. Cancelling lives in **My bookings** (top right), scoped to whatever this
-browser has created; there's no login, so that's the only sense in which bookings are
-"yours". See the API section below for exactly what the relay does under the hood.
+book it — a modal asks for a duration, what it's for, your name, and optionally your
+email, remembering all of it for next time.
+
+Click an existing booking to preview it, then **Edit** to change or cancel it. Whether
+that button needs a password depends on whether *this browser* already knows one for
+that booking, not on who actually created it — there's no login, so "yours" can only ever
+mean "this browser remembers the password". A plain "Edit" uses a password already on
+file; "Edit 🔒" asks for one, and offers to remember it afterward if correct. **My
+bookings** (top right) is just the list of what's currently remembered, with a cancel
+button on each. See the API section below for exactly what the relay does under the
+hood, including a real appliance quirk the edit path has to work around.
 
 ## Relay API
 
@@ -177,8 +191,10 @@ naive local datetime, or a fully-qualified ISO string; `days` sets the span when
 omitted. Range capped at `RW_MAX_RANGE_DAYS` (default 31).
 
 Each room gets a `busy` list (the bookings) and a `free` list (the gaps, already clipped
-to bookable hours). Rooms that fail to answer appear in `errors` rather than silently
-showing as empty, so the UI can tell "nothing booked" from "we don't know".
+to bookable hours). A booking in `busy` includes `hostEmail` when one was given — visible
+to anyone, since the appliance's own schedule already is. Rooms that fail to answer
+appear in `errors` rather than silently showing as empty, so the UI can tell "nothing
+booked" from "we don't know".
 
 All timestamps are ISO 8601 with an explicit offset, computed per instant — so zones that
 observe DST are handled correctly even though BSRL's does not.
@@ -193,25 +209,58 @@ observe DST are handled correctly even though BSRL's does not.
   "purpose": "Lab meeting",
   "hostFirstName": "Sam",
   "hostLastName": "Rivera",
+  "hostEmail": "optional — persisted and echoed back by the appliance, verified live",
   "password": "optional — the relay generates a strong one if omitted"
 }
 ```
 
 Matches what the appliance actually requires (PLAN.md section 2): `purpose`, at least one
 of `hostFirstName`/`hostLastName`, and a start/end inside the fleet's bookable hours.
-Everything the real booking form also supports — recurrence, invitees, cost centers,
-confidential — is out of scope here.
+Everything the real booking form also supports — recurrence and invitees — is out of
+scope here; the invitee fields (`user1`/`user2`/`user3`) are present on the form but
+appear to need an LDAP directory this install doesn't have configured, so setting them
+had no observable effect in testing and the relay doesn't expose them.
 
 Before writing, the relay re-checks the room's live bookings for a conflict (`409` if the
 slot was just taken) and re-reads the room after a successful write to hand back a real
 booking id (`201`) — the appliance's own success response is a bare redirect with no id in
 it. The response includes the booking's password **exactly once**; the relay is stateless
-and does not keep it, so the caller must hold onto it to cancel later.
+and does not keep it, so the caller must hold onto it to edit or cancel later.
+
+### `POST /api/booking/:roomId/:id/unlock`
+
+```json
+{ "password": "the booking's current password" }
+```
+
+Proves a password and returns the booking's real current fields — purpose, split
+`hostFirstName`/`hostLastName`, `hostEmail`, `start`, `end` — which the appliance
+otherwise keeps hidden even from its own edit page until this exact check passes
+(verified live). This is what the UI calls before showing an edit form, for a booking
+this browser already recognizes just as much as one it doesn't: neither case has an
+accurate local copy of every field. `404` if no such booking, `403` if the password is
+wrong.
+
+### `PUT /api/booking/:roomId/:id`
+
+Same body shape as `POST /api/book`, plus `currentPassword`. Re-checks for a conflict
+against the room's *other* bookings (excluding this one — otherwise moving a booking by
+even a minute would always conflict with its unmodified former self).
+
+**A real appliance quirk, worth knowing if you're reading this code**: a validate-then-
+update sequence can get back an accepted redirect while leaving the booking's fields
+completely unchanged. Caught by driving the actual UI, not by calling the API directly —
+the failure only showed up once something else was *also* hitting the same appliance at
+the same time (the picker's own background availability refetch), which points at
+appliance-side session handling under concurrent requests, not a bug this relay can fix
+on the appliance's end. So the relay doesn't trust the redirect: it re-reads the booking
+after writing and compares, retrying the whole validate-and-submit sequence once before
+reporting failure. `cancelBooking` does the same check for the same reason.
 
 ### `DELETE /api/booking/:roomId/:id`
 
 ```json
-{ "password": "whatever POST /api/book returned" }
+{ "password": "whatever created or last unlocked this booking" }
 ```
 
 `404` if no such booking exists on that room, `403` if the password is wrong. Both are

@@ -107,3 +107,23 @@ export function isWeekend(date: string): boolean {
   const dow = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
   return dow === 0 || dow === 6;
 }
+
+// ---------------------------------------------------------------------------
+// Minute-of-day <-> clock string, for the booking create/edit forms
+// ---------------------------------------------------------------------------
+
+const padMinute = (n: number) => String(n).padStart(2, "0");
+
+/** 990 -> "16:30", for building a naive local datetime string. */
+export function minuteToClock(minute: number): string {
+  return `${padMinute(Math.floor(minute / 60) % 24)}:${padMinute(minute % 60)}`;
+}
+
+/** 990 -> "4:30 pm", for display. */
+export function minuteTo12h(minute: number): string {
+  const h = Math.floor(minute / 60) % 24;
+  const m = minute % 60;
+  const suffix = h < 12 ? "am" : "pm";
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}:${padMinute(m)} ${suffix}`;
+}
