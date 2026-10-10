@@ -122,6 +122,17 @@ export const MAX_CONCURRENCY = envNumber("MAX_CONCURRENCY", 9);
 /** Hard ceiling on an availability query, in days. Each day is N more requests. */
 export const MAX_RANGE_DAYS = envNumber("MAX_RANGE_DAYS", 31);
 
+/**
+ * Longest single booking the relay will create or accept an edit to. Guards
+ * against a fat-fingered multi-day range reaching `saveBooking.action`. Exposed
+ * on the fleet so the UI can offer exactly the end times that will be accepted
+ * rather than keeping its own copy of this number.
+ */
+export const MAX_BOOKING_HOURS = envNumber("MAX_BOOKING_HOURS", 8);
+
+/** Shortest single booking. Below this is almost certainly a mis-click. */
+export const MIN_BOOKING_MINUTES = envNumber("MIN_BOOKING_MINUTES", 5);
+
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------

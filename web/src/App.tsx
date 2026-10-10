@@ -127,6 +127,24 @@ export default function App() {
       ? minutesOfDay(new Date().toISOString(), timeZone)
       : null;
 
+  /**
+   * One room's bookings for the selected day as minute-of-day intervals, which
+   * is what the end-time limit logic works in. `exceptBookingId` drops the
+   * booking currently being edited.
+   */
+  function busyMinutesFor(roomId: string, exceptBookingId?: string) {
+    const entry = dayEntries.find((e) => e.room.id === roomId);
+    if (!entry) return [];
+    return entry.busy
+      .filter((b) => b.id !== exceptBookingId)
+      .map((b) => {
+        const startMinute = minutesOfDay(b.start, timeZone);
+        const rawEnd = minutesOfDay(b.end, timeZone);
+        // An end of exactly midnight reads as 0; treat it as end-of-day.
+        return { startMinute, endMinute: rawEnd === 0 && startMinute > 0 ? 24 * 60 : rawEnd };
+      });
+  }
+
   const error = fleetQuery.error ?? availabilityQuery.error;
 
   return (
@@ -294,6 +312,8 @@ export default function App() {
           startMinute={selection.minute}
           dayEndHour={dayEndHour}
           slotMinutes={fleetMeta?.slotMinutes ?? 15}
+          maxBookingHours={fleetMeta?.maxBookingHours ?? 8}
+          busy={busyMinutesFor(selection.room.id)}
           onClose={() => setSelection(null)}
           onBooked={afterBookingChange}
         />
@@ -305,6 +325,11 @@ export default function App() {
           booking={preview.booking}
           timeZone={timeZone}
           dayEndHour={dayEndHour}
+          slotMinutes={fleetMeta?.slotMinutes ?? 15}
+          maxBookingHours={fleetMeta?.maxBookingHours ?? 8}
+          // Exclude the booking being edited, or extending it would look like
+          // a collision with its own unmodified self.
+          busy={busyMinutesFor(preview.room.id, preview.booking.id)}
           onClose={() => setPreview(null)}
           onChanged={afterBookingChange}
         />

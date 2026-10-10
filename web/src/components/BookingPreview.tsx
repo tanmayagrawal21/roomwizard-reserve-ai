@@ -27,16 +27,25 @@ import {
   updateBooking,
   type Booking,
   type Room,
+  type UnlockedBooking,
 } from "../api";
 import { addMyBooking, listMyBookings, removeMyBooking } from "../lib/myBookings";
+import { allowedDurations, allowedEndMinutes, type EndTimeLimits } from "../lib/slots";
 import { formatDuration, formatTime, minuteTo12h, minuteToClock, minutesOfDay } from "../lib/time";
-import { BookingFields } from "./BookingFields";
+import { BookingFields, PREFERRED_DURATIONS } from "./BookingFields";
 
 interface Props {
   room: Room;
   booking: Booking;
   timeZone: string;
   dayEndHour: number;
+  slotMinutes: number;
+  maxBookingHours: number;
+  /**
+   * Other bookings in this room on this day. Must already exclude the one
+   * being previewed, or editing it would appear to collide with itself.
+   */
+  busy: { startMinute: number; endMinute: number }[];
   onClose: () => void;
   /** A save or cancel changed something the week view needs to refetch. */
   onChanged: () => void;
@@ -53,30 +62,44 @@ type View =
       firstName: string;
       lastName: string;
       email: string;
-      duration: number;
+      endMinute: number;
+      custom: boolean;
       submitting: "save" | "delete" | null;
       error: string | null;
     };
 
-export function BookingPreview({ room, booking, timeZone, dayEndHour, onClose, onChanged }: Props) {
+export function BookingPreview({
+  room,
+  booking,
+  timeZone,
+  dayEndHour,
+  slotMinutes,
+  maxBookingHours,
+  busy,
+  onClose,
+  onChanged,
+}: Props) {
   const tracked = listMyBookings().find((b) => b.roomId === room.id && b.id === booking.id);
   const isMine = tracked !== undefined;
   const [view, setView] = useState<View>({ kind: "details" });
 
   const originalStartMinute = minutesOfDay(booking.start, timeZone);
-  const maxDuration = Math.max(15, dayEndHour * 60 - originalStartMinute);
   const date = booking.start.slice(0, 10);
 
-  function startEditing(password: string, remember: boolean, fields: {
-    purpose: string;
-    hostFirstName: string;
-    hostLastName: string;
-    hostEmail: string;
-    start: string;
-  }) {
-    const durationMinutes = Math.round(
-      (new Date(booking.end).getTime() - new Date(fields.start).getTime()) / 60_000,
-    );
+  const limits: EndTimeLimits = {
+    startMinute: originalStartMinute,
+    dayEndHour,
+    slotMinutes,
+    maxBookingHours,
+    busy,
+  };
+  const allowedEnds = allowedEndMinutes(limits);
+  const fittingDurations = allowedDurations(limits, PREFERRED_DURATIONS);
+
+  function startEditing(password: string, remember: boolean, fields: UnlockedBooking) {
+    // Seed the form with the booking's real current end time, from the
+    // unlocked fields rather than from whatever the local copy remembered.
+    const currentEnd = minutesOfDay(fields.end, timeZone);
     setView({
       kind: "edit",
       password,
@@ -85,7 +108,8 @@ export function BookingPreview({ room, booking, timeZone, dayEndHour, onClose, o
       firstName: fields.hostFirstName,
       lastName: fields.hostLastName,
       email: fields.hostEmail,
-      duration: Math.max(15, durationMinutes || 30),
+      endMinute: currentEnd > originalStartMinute ? currentEnd : originalStartMinute + slotMinutes,
+      custom: false,
       submitting: null,
       error: null,
     });
@@ -137,7 +161,7 @@ export function BookingPreview({ room, booking, timeZone, dayEndHour, onClose, o
     setView({ ...view, submitting: "save", error: null });
     try {
       const start = `${date}T${minuteToClock(originalStartMinute)}:00`;
-      const end = `${date}T${minuteToClock(originalStartMinute + view.duration)}:00`;
+      const end = `${date}T${minuteToClock(view.endMinute)}:00`;
       await updateBooking(room.id, booking.id, {
         roomId: room.id,
         start,
@@ -182,7 +206,7 @@ export function BookingPreview({ room, booking, timeZone, dayEndHour, onClose, o
         <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{room.name}</h2>
         <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
           {view.kind === "edit"
-            ? `${minuteTo12h(originalStartMinute)} – ${minuteTo12h(originalStartMinute + view.duration)}`
+            ? `${minuteTo12h(originalStartMinute)} – ${minuteTo12h(view.endMinute)}`
             : `${formatTime(booking.start, timeZone)} – ${formatTime(booking.end, timeZone)} · ${formatDuration(booking.start, booking.end)}`}
         </p>
 
@@ -291,6 +315,13 @@ export function BookingPreview({ room, booking, timeZone, dayEndHour, onClose, o
         {view.kind === "edit" && (
           <>
             <BookingFields
+              startMinute={originalStartMinute}
+              endMinute={view.endMinute}
+              onEndMinuteChange={(m) => setView({ ...view, endMinute: m })}
+              allowedEnds={allowedEnds}
+              fittingDurations={fittingDurations}
+              custom={view.custom}
+              onCustomChange={(v) => setView({ ...view, custom: v })}
               purpose={view.purpose}
               onPurposeChange={(v) => setView({ ...view, purpose: v })}
               firstName={view.firstName}
@@ -299,9 +330,6 @@ export function BookingPreview({ room, booking, timeZone, dayEndHour, onClose, o
               onLastNameChange={(v) => setView({ ...view, lastName: v })}
               email={view.email}
               onEmailChange={(v) => setView({ ...view, email: v })}
-              duration={view.duration}
-              onDurationChange={(d) => setView({ ...view, duration: d })}
-              maxDuration={maxDuration}
               error={view.error}
             />
             <div className="mt-4 flex items-center justify-between gap-2">

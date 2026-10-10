@@ -28,6 +28,8 @@ export interface Fleet {
   dayStartHour: number;
   dayEndHour: number;
   slotMinutes: number;
+  /** Longest single booking the relay accepts; the UI offers only end times within it. */
+  maxBookingHours: number;
   timezone: string;
   applianceTime: string | null;
 }

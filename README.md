@@ -143,8 +143,11 @@ rather than as empty — "free" and "unknown" are different claims and the UI sh
 conflate them.
 
 Click a free slot (anywhere on the emerald background, not on an existing booking) to
-book it — a modal asks for a duration, what it's for, your name, and optionally your
-email, remembering all of it for next time.
+book it — a modal asks for an end time, what it's for, your name, and optionally your
+email, remembering all of it for next time. End time offers quick duration presets plus
+a **Custom time** picker; both only ever list times the relay will actually accept,
+clamped by whichever of these comes first: the next booking in that room, the end of the
+bookable day, or `RW_MAX_BOOKING_HOURS`. The same picker appears when editing.
 
 Click an existing booking to preview it, then **Edit** to change or cancel it. Whether
 that button needs a password depends on whether *this browser* already knows one for

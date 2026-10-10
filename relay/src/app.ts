@@ -11,7 +11,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { z } from "zod";
-import { ALLOWED_ORIGINS, MAX_RANGE_DAYS } from "./config.ts";
+import {
+  ALLOWED_ORIGINS,
+  MAX_BOOKING_HOURS,
+  MAX_RANGE_DAYS,
+  MIN_BOOKING_MINUTES,
+} from "./config.ts";
 import {
   getAvailability,
   invalidateBookings,
@@ -76,10 +81,6 @@ const updateRequest = bookRequest.extend({
   /** The booking's current password, proving the caller may edit it. */
   currentPassword: z.string().min(1),
 });
-
-/** Longest booking the relay will create in one call. Guards against a fat-fingered multi-day request reaching saveBooking.action. */
-const MAX_BOOKING_HOURS = 8;
-const MIN_BOOKING_MINUTES = 5;
 
 export function createApp() {
   const app = new Hono();

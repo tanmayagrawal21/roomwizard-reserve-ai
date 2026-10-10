@@ -12,6 +12,7 @@ import {
   DEFAULT_DAY_END_HOUR,
   DEFAULT_DAY_START_HOUR,
   ROSTER_HOST,
+  MAX_BOOKING_HOURS,
   SITE_NAME,
   SLOT_MINUTES,
   TIMEZONE,
@@ -47,6 +48,8 @@ export interface Fleet {
   dayStartHour: number;
   dayEndHour: number;
   slotMinutes: number;
+  /** Longest single booking the relay will accept, so the UI can offer only valid end times. */
+  maxBookingHours: number;
   timezone: string;
   /** The appliance's own clock, useful for spotting drift. */
   applianceTime: string | null;
@@ -150,6 +153,7 @@ export function normalizeRoster(roster: RawRoster): Fleet {
     dayStartHour: parseTimelineHour(roster.timelineStart, DEFAULT_DAY_START_HOUR),
     dayEndHour: parseTimelineHour(roster.timelineEnd, DEFAULT_DAY_END_HOUR),
     slotMinutes: Number(roster.defaultBookingLength) || SLOT_MINUTES,
+    maxBookingHours: MAX_BOOKING_HOURS,
     timezone: TIMEZONE,
     applianceTime,
   };

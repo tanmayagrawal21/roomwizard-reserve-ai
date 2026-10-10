@@ -13,12 +13,13 @@
  * timezone math on the client to produce a real offset.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createBooking, RelayError, type Room } from "../api";
 import { addMyBooking } from "../lib/myBookings";
 import { getProfile, saveProfile } from "../lib/profile";
+import { allowedDurations, allowedEndMinutes, type EndTimeLimits } from "../lib/slots";
 import { minuteTo12h, minuteToClock } from "../lib/time";
-import { BookingFields } from "./BookingFields";
+import { BookingFields, PREFERRED_DURATIONS } from "./BookingFields";
 
 interface Props {
   room: Room;
@@ -27,6 +28,9 @@ interface Props {
   startMinute: number;
   dayEndHour: number;
   slotMinutes: number;
+  maxBookingHours: number;
+  /** Other bookings in this room on this day, so we never offer a conflicting end time. */
+  busy: { startMinute: number; endMinute: number }[];
   onClose: () => void;
   onBooked: () => void;
 }
@@ -37,25 +41,43 @@ export function BookingModal({
   startMinute,
   dayEndHour,
   slotMinutes,
+  maxBookingHours,
+  busy,
   onClose,
   onBooked,
 }: Props) {
   const profile = getProfile();
+
+  const limits: EndTimeLimits = useMemo(
+    () => ({ startMinute, dayEndHour, slotMinutes, maxBookingHours, busy }),
+    [startMinute, dayEndHour, slotMinutes, maxBookingHours, busy],
+  );
+  const allowedEnds = useMemo(() => allowedEndMinutes(limits), [limits]);
+  const fittingDurations = useMemo(
+    () => allowedDurations(limits, PREFERRED_DURATIONS),
+    [limits],
+  );
+
   const [purpose, setPurpose] = useState("");
   const [firstName, setFirstName] = useState(profile.firstName);
   const [lastName, setLastName] = useState(profile.lastName);
   const [email, setEmail] = useState(profile.email);
-  const [duration, setDuration] = useState(
-    Math.min(60, dayEndHour * 60 - startMinute) || slotMinutes,
-  );
+  // Default to an hour when it fits, else the longest thing that does.
+  const [endMinute, setEndMinute] = useState(() => {
+    const hour = startMinute + 60;
+    if (allowedEnds.includes(hour)) return hour;
+    return allowedEnds.length > 0 ? allowedEnds[allowedEnds.length - 1]! : startMinute + slotMinutes;
+  });
+  const [custom, setCustom] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ password: string } | null>(null);
 
-  const maxDuration = Math.max(slotMinutes, dayEndHour * 60 - startMinute);
-  const endMinute = startMinute + duration;
-
-  const canSubmit = purpose.trim() !== "" && (firstName.trim() !== "" || lastName.trim() !== "");
+  const canSubmit =
+    allowedEnds.length > 0 &&
+    endMinute > startMinute &&
+    purpose.trim() !== "" &&
+    (firstName.trim() !== "" || lastName.trim() !== "");
 
   async function submit() {
     if (!canSubmit || submitting) return;
@@ -115,6 +137,13 @@ export function BookingModal({
             </p>
 
             <BookingFields
+              startMinute={startMinute}
+              endMinute={endMinute}
+              onEndMinuteChange={setEndMinute}
+              allowedEnds={allowedEnds}
+              fittingDurations={fittingDurations}
+              custom={custom}
+              onCustomChange={setCustom}
               purpose={purpose}
               onPurposeChange={setPurpose}
               firstName={firstName}
@@ -123,9 +152,6 @@ export function BookingModal({
               onLastNameChange={setLastName}
               email={email}
               onEmailChange={setEmail}
-              duration={duration}
-              onDurationChange={setDuration}
-              maxDuration={maxDuration}
               error={error}
             />
 
