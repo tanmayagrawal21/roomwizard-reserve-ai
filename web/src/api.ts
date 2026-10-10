@@ -225,6 +225,52 @@ export const cancelBooking = (roomId: string, bookingId: string, password: strin
     password,
   });
 
+// ---------------------------------------------------------------------------
+// Slot finding
+// ---------------------------------------------------------------------------
+
+export interface SlotCandidate {
+  roomId: string;
+  roomName: string;
+  capacity: number;
+  floor: number | null;
+  amenities: Amenity[];
+  start: string;
+  end: string;
+  /** 0..1, higher is better. */
+  score: number;
+  /** Human-readable justifications, safe to show verbatim. */
+  reasons: string[];
+}
+
+export interface FindSlotsResult {
+  candidates: SlotCandidate[];
+  totalFound: number;
+  /** Set when nothing matched, naming the binding constraint. */
+  noMatchReason: string | null;
+}
+
+export interface SlotSearch {
+  duration: number;
+  days: number;
+  minCapacity?: number;
+  amenities: Amenity[];
+  earliestHour?: number;
+  latestHour?: number;
+}
+
+export function findSlots(search: SlotSearch, signal?: AbortSignal) {
+  const p = new URLSearchParams({
+    duration: String(search.duration),
+    days: String(search.days),
+  });
+  if (search.minCapacity) p.set("minCapacity", String(search.minCapacity));
+  if (search.amenities.length > 0) p.set("amenities", search.amenities.join(","));
+  if (search.earliestHour !== undefined) p.set("earliestHour", String(search.earliestHour));
+  if (search.latestHour !== undefined) p.set("latestHour", String(search.latestHour));
+  return get<FindSlotsResult>(`/api/slots?${p.toString()}`, signal);
+}
+
 export interface UnlockedBooking {
   purpose: string;
   hostFirstName: string;

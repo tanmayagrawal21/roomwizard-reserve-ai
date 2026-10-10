@@ -15,6 +15,7 @@ import { FilterBar } from "./components/FilterBar";
 import { MyBookingsPanel } from "./components/MyBookingsPanel";
 import { RelaySettings } from "./components/RelaySettings";
 import { RoomErrorRow, RoomRow } from "./components/RoomRow";
+import { SlotFinder } from "./components/SlotFinder";
 import { HourAxis } from "./components/Timeline";
 import { WeekStrip } from "./components/WeekStrip";
 import { dayUtilization, EMPTY_FILTERS, matchesFilters, type Filters } from "./lib/filters";
@@ -34,7 +35,13 @@ export default function App() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [showSettings, setShowSettings] = useState(false);
   const [showMyBookings, setShowMyBookings] = useState(false);
-  const [selection, setSelection] = useState<{ room: Room; minute: number } | null>(null);
+  const [showFinder, setShowFinder] = useState(false);
+  const [selection, setSelection] = useState<{
+    room: Room;
+    minute: number;
+    /** Set only when a slot-finder suggestion supplied a duration. */
+    endMinute?: number;
+  } | null>(null);
   const [preview, setPreview] = useState<{ room: Room; booking: Booking } | null>(null);
   const [myBookings, setMyBookings] = useState<TrackedBooking[]>(() => listMyBookings());
   /** Monday-agnostic: the window simply starts at the anchor date. */
@@ -171,6 +178,13 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => setShowFinder(true)}
+            className="rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+          >
+            Find a slot
+          </button>
+          <button
+            type="button"
             onClick={() => setShowMyBookings(true)}
             className="rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           >
@@ -297,6 +311,30 @@ export default function App() {
 
       {showSettings && <RelaySettings onClose={() => setShowSettings(false)} />}
 
+      {showFinder && (
+        <SlotFinder
+          timeZone={timeZone}
+          onClose={() => setShowFinder(false)}
+          onPick={(c) => {
+            const room = fleetQuery.data?.rooms.find((r) => r.id === c.roomId);
+            if (!room) return;
+            const date = c.start.slice(0, 10);
+            // Jump the grid to that day so the context behind the suggestion is
+            // visible behind the booking form, not just the form in isolation.
+            setAnchor(date);
+            setSelected(date);
+            setShowFinder(false);
+            setSelection({
+              room,
+              minute: minutesOfDay(c.start, timeZone),
+              // Carry the suggested length through; the whole point of asking
+              // for 90 minutes is not to be handed a 60-minute form.
+              endMinute: minutesOfDay(c.end, timeZone),
+            });
+          }}
+        />
+      )}
+
       {showMyBookings && (
         <MyBookingsPanel
           bookings={myBookings}
@@ -314,6 +352,7 @@ export default function App() {
           slotMinutes={fleetMeta?.slotMinutes ?? 15}
           maxBookingHours={fleetMeta?.maxBookingHours ?? 8}
           busy={busyMinutesFor(selection.room.id)}
+          {...(selection.endMinute !== undefined ? { initialEndMinute: selection.endMinute } : {})}
           onClose={() => setSelection(null)}
           onBooked={afterBookingChange}
         />

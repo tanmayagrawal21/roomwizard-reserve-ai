@@ -24,6 +24,7 @@ import {
   overlapsRange,
 } from "./availability.ts";
 import { findRoom, getFleet } from "./rooms.ts";
+import { findSlots } from "./slots.ts";
 import { fetchBookings, ApplianceError } from "./roomwizard.ts";
 import {
   BookingRejectedError,
@@ -75,6 +76,28 @@ const cancelRequest = z.object({
 
 const unlockRequest = z.object({
   password: z.string().min(1),
+});
+
+/**
+ * Flat and enum-friendly on purpose: this is the shape the Phase 5 LLM tool
+ * will call, and a small model handles scalar arguments far more reliably than
+ * nested objects (PLAN.md section 5).
+ */
+const AMENITIES = ["camera", "pc", "cisco_vc", "audio_conf"] as const;
+
+const findSlotsQuery = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+  days: z.coerce.number().int().min(1).max(MAX_RANGE_DAYS).optional(),
+  duration: z.coerce.number().int().min(5).max(MAX_BOOKING_HOURS * 60),
+  earliestHour: z.coerce.number().min(0).max(24).optional(),
+  latestHour: z.coerce.number().min(0).max(24).optional(),
+  minCapacity: z.coerce.number().int().min(1).max(500).optional(),
+  /** Comma-separated, so it survives a query string and a flat tool argument alike. */
+  amenities: z.string().optional(),
+  floor: z.coerce.number().int().optional(),
+  rooms: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
 });
 
 const updateRequest = bookRequest.extend({
@@ -272,6 +295,70 @@ export function createApp() {
       }
       throw err;
     }
+  });
+
+  /**
+   * Rank where a meeting of a given length could go.
+   *
+   * Hard filters (capacity, amenities, floor, hour window) exclude; the
+   * ranking only reorders what survives. Every candidate carries the reasons
+   * behind its score, and an empty result carries `noMatchReason` naming the
+   * binding constraint rather than just being empty.
+   */
+  app.get("/api/slots", async (c) => {
+    const parsed = findSlotsQuery.safeParse(c.req.query());
+    if (!parsed.success) {
+      return c.json({ error: "Invalid query", details: parsed.error.flatten() }, 400);
+    }
+    const q = parsed.data;
+
+    let from: Date;
+    let to: Date;
+    try {
+      from = q.from ? startOfLocalDay(parseClientDateTime(q.from)) : startOfLocalDay(new Date());
+      to = q.to ? parseClientDateTime(q.to) : addDays(from, q.days ?? 7);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    if (to.getTime() <= from.getTime()) {
+      return c.json({ error: "`to` must be after `from`" }, 400);
+    }
+    if ((to.getTime() - from.getTime()) / 86_400_000 > MAX_RANGE_DAYS) {
+      return c.json({ error: `Range too large, max ${MAX_RANGE_DAYS} days` }, 400);
+    }
+    if (
+      q.earliestHour !== undefined &&
+      q.latestHour !== undefined &&
+      q.latestHour <= q.earliestHour
+    ) {
+      return c.json({ error: "`latestHour` must be after `earliestHour`" }, 400);
+    }
+
+    const amenities = (q.amenities ?? "")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    const unknown = amenities.filter((a) => !AMENITIES.includes(a as (typeof AMENITIES)[number]));
+    if (unknown.length > 0) {
+      return c.json(
+        { error: `Unknown amenity: ${unknown.join(", ")}. Valid: ${AMENITIES.join(", ")}` },
+        400,
+      );
+    }
+
+    const result = await findSlots({
+      from,
+      to,
+      durationMinutes: q.duration,
+      ...(q.earliestHour !== undefined ? { earliestHour: q.earliestHour } : {}),
+      ...(q.latestHour !== undefined ? { latestHour: q.latestHour } : {}),
+      ...(q.minCapacity !== undefined ? { minCapacity: q.minCapacity } : {}),
+      amenities: amenities as (typeof AMENITIES)[number][],
+      ...(q.floor !== undefined ? { floor: q.floor } : {}),
+      roomIds: (q.rooms ?? "").split(",").map((r) => r.trim()).filter(Boolean),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    });
+    return c.json(result);
   });
 
   /**

@@ -16,9 +16,9 @@ the build plan.
 
 ## Status
 
-**Phases 1-3 complete** — relay, picker UI, and booking (create, edit, cancel) are all
-wired up end to end and verified against the live BSRL fleet, including driving the real
-browser UI through full create → edit → confirm → cancel → confirm round trips.
+**Phases 1-4 complete** — relay, picker UI, booking (create, edit, cancel), and a ranked
+slot finder, all verified against the live BSRL fleet by driving the real browser UI, not
+just the API.
 
 | Phase | What | State |
 |---|---|---|
@@ -26,8 +26,8 @@ browser UI through full create → edit → confirm → cancel → confirm round
 | 1 | Relay: roster + availability | ✅ done, 79 tests |
 | 2 | Picker UI | ✅ done |
 | 3 | Create, edit, cancel bookings, relay and UI | ✅ done, 118 tests, verified live end to end |
-| 4 | Slot finder | next |
-| 5 | Chat (local Qwen via Ollama) | — |
+| 4 | Slot finder | ✅ done, 159 tests, verified live |
+| 5 | Chat (local Qwen via Ollama) | next |
 
 You can book through the UI: click a free slot on any room's timeline, fill in what it's
 for, your name, and optionally an email, and it's created on the real appliance.
@@ -80,7 +80,7 @@ To configure a non-BSRL installation, `cp relay/example.env relay/.env` and edit
 ### Checks
 
 ```bash
-npm test          # 113 tests (relay + web), no network access needed
+npm test          # 159 tests (relay + web), no network access needed
 npm run typecheck
 npm run build
 ```
@@ -158,6 +158,24 @@ bookings** (top right) is just the list of what's currently remembered, with a c
 button on each. See the API section below for exactly what the relay does under the
 hood, including a real appliance quirk the edit path has to work around.
 
+## Finding a slot
+
+**Find a slot** (top right) answers "where can I put 90 minutes for six people with a
+camera this week?" — pick a duration, rough time of day, date range, headcount and
+equipment, and it returns a ranked shortlist. Clicking one opens the booking form at
+exactly that room and time, with the duration you asked for.
+
+The ranking is deterministic and lives entirely in the relay, which matters for two
+reasons: it has to be explainable, and Phase 5's local model will call the same endpoint
+rather than trying to reason over 9 rooms × 48 slots itself (PLAN.md §5). Three things
+are weighted — soonest, right-sized room, and tidy placement — and each suggestion
+carries the plain-English reasons behind its score, shown verbatim in the UI.
+
+"Tidy" means preferring not to fragment a free gap: a 1-hour meeting dropped into the
+middle of a 3-hour gap leaves two awkward stubs, whereas putting it flush against an
+existing booking leaves the remainder usable. That only applies next to *real* bookings —
+an early slot on an otherwise-empty day isn't tidy, just early.
+
 ## Relay API
 
 ### `GET /healthz`
@@ -229,6 +247,44 @@ slot was just taken) and re-reads the room after a successful write to hand back
 booking id (`201`) — the appliance's own success response is a bare redirect with no id in
 it. The response includes the booking's password **exactly once**; the relay is stateless
 and does not keep it, so the caller must hold onto it to edit or cancel later.
+
+### `GET /api/slots?duration=&days=&minCapacity=&amenities=&earliestHour=&latestHour=`
+
+Ranked openings for a meeting of `duration` minutes. `amenities` is comma-separated
+(`camera`, `pc`, `cisco_vc`, `audio_conf`). Capacity, amenities, floor and the hour window
+are hard filters; the ranking only reorders what survives them.
+
+Flat scalar arguments on purpose — this is the shape the Phase 5 LLM tool calls, and a
+small model handles scalars far more reliably than nested objects.
+
+```json
+{
+  "candidates": [
+    {
+      "roomId": "bsrl-100",
+      "roomName": "BSRL-100",
+      "capacity": 8,
+      "floor": 1,
+      "amenities": ["camera", "pc"],
+      "start": "2026-10-10T12:00:00-07:00",
+      "end": "2026-10-10T13:30:00-07:00",
+      "score": 0.82,
+      "reasons": ["close fit (8 seats for 6)"]
+    }
+  ],
+  "totalFound": 523,
+  "noMatchReason": null
+}
+```
+
+`totalFound` is everything that passed the filters; `candidates` is a deliberately varied
+shortlist rather than the raw top N — scoring "soonest" heavily means the unfiltered top
+is every room at one single time, which is one option shown nine times. Candidates are
+spread across distinct hours and rooms, then re-sorted by score.
+
+When nothing matches, `noMatchReason` names the *binding* constraint by re-running the
+filter with one requirement dropped at a time — "No room seating 500 or more is free for
+that long in this range" rather than an unexplained empty list.
 
 ### `POST /api/booking/:roomId/:id/unlock`
 

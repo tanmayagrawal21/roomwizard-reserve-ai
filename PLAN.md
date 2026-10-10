@@ -377,8 +377,29 @@ cancel → confirm gone; and, separately, previewing a booking this browser does
 recognize → rejecting a wrong password → accepting the right one → confirming it's now
 remembered → editing and cancelling it like any other.
 
-**Phase 4 — slot finder.** Deterministic ranking (`find_slots`). Useful on its own, and
-the tool the model leans on hardest.
+**Phase 4 — slot finder.** ✅ Done, relay and UI. `GET /api/slots` ranks openings for a
+given duration; a "Find a slot" panel presents the shortlist and hands a pick straight to
+the booking form. Flat scalar query args, because this becomes the Phase 5 LLM tool.
+
+Three weighted terms: soonest, right-sized room (don't hand a 2-person meeting the 10-seat
+room), and tidy placement (don't fragment a free gap). Each candidate carries its reasons
+as plain strings, rendered verbatim in the UI — a recommendation the chat will have to
+explain has to be explainable from the same words.
+
+Two ranking flaws only showed up against real data, both now fixed with regression tests:
+
+- Scoring "soonest" heavily makes the raw top of the list *every room at the single
+  earliest opening* — nine rooms at 7:00 on a quiet Saturday is one option shown nine
+  times. Keying the shortlist on exact start time overcorrected into 7:00/7:15/7:30 in one
+  room, which is the same decision three times. Bucketing by hour, and requiring a new
+  room as well as a new hour on the first pass, is what actually reads as alternatives.
+- The tidiness bonus fired on the *bookable-day* edge, not just next to real bookings, so
+  a 17:30 slot outranked 08:00 on the same empty day. A day boundary is not a neighbour;
+  it now earns neither bonus nor penalty.
+
+A third bug was caught by driving the UI: picking a 90-minute suggestion opened the
+booking form at 60 minutes, silently discarding the duration that was searched for. The
+handoff now carries the candidate's end time.
 
 **Phase 5 — chat.** Ollama + relay-side tool loop + SQLite history +
 selection-as-context + confirmation cards.

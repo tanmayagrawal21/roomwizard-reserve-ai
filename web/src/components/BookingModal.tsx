@@ -31,6 +31,12 @@ interface Props {
   maxBookingHours: number;
   /** Other bookings in this room on this day, so we never offer a conflicting end time. */
   busy: { startMinute: number; endMinute: number }[];
+  /**
+   * Preferred end time, in minutes from local midnight. Set when the slot
+   * finder hands over a suggestion, so the duration the user searched for
+   * survives into the form instead of silently reverting to the default hour.
+   */
+  initialEndMinute?: number;
   onClose: () => void;
   onBooked: () => void;
 }
@@ -43,6 +49,7 @@ export function BookingModal({
   slotMinutes,
   maxBookingHours,
   busy,
+  initialEndMinute,
   onClose,
   onBooked,
 }: Props) {
@@ -62,10 +69,11 @@ export function BookingModal({
   const [firstName, setFirstName] = useState(profile.firstName);
   const [lastName, setLastName] = useState(profile.lastName);
   const [email, setEmail] = useState(profile.email);
-  // Default to an hour when it fits, else the longest thing that does.
+  // Prefer a requested end time, then an hour, then the longest that fits.
   const [endMinute, setEndMinute] = useState(() => {
-    const hour = startMinute + 60;
-    if (allowedEnds.includes(hour)) return hour;
+    for (const wanted of [initialEndMinute, startMinute + 60]) {
+      if (wanted !== undefined && allowedEnds.includes(wanted)) return wanted;
+    }
     return allowedEnds.length > 0 ? allowedEnds[allowedEnds.length - 1]! : startMinute + slotMinutes;
   });
   const [custom, setCustom] = useState(false);
