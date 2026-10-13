@@ -105,6 +105,13 @@ and model weights live in named volumes, so restarts keep both.
 private addresses; a public cloud VM cannot reach them however this is
 configured.
 
+**Give it enough RAM.** `qwen3:4b` needs roughly 3 GB resident, and the whole
+stack wants headroom beyond that. Measured on a 16 GB machine that was also
+running Docker Desktop, an IDE and a browser: swap hit 21 GB of 22 GB with
+650k pageouts, and per-request overhead went from 0.0s to 21-113s purely from
+thrashing — the model itself was fine. If replies are wildly slower than about
+35 tokens/sec, check memory pressure before blaming the model.
+
 Two settings matter for a new site — the rest have working defaults:
 
 ```bash
@@ -211,6 +218,13 @@ camera rooms seating six is already unambiguous in the arguments it passed.
 **Replies stream** token by token, because a 4B model on consumer hardware takes tens of
 seconds and silence reads as broken rather than slow. While it works, the panel names the
 tool it's running ("searching for openings…") instead of a generic spinner.
+
+On speed, measured rather than assumed: generation runs ~35 tokens/sec for `qwen3:4b` on
+an M4 via Metal, and a cold model load costs about 1 second — neither is the bottleneck.
+A turn is slow because it generates several hundred tokens per tool round, ~90% of which
+is the model's hidden reasoning. Turning reasoning off (`think: false`) does *not* help:
+it spends the same token budget writing a far more verbose answer instead, which is worse
+here. The levers that actually matter are free memory and the number of tool rounds.
 
 ### What it can and can't do on its own
 
