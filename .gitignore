@@ -9,3 +9,5 @@ relay/.env
 SECURITY-NOTES.md
 web/dist/
 *.tsbuildinfo
+chat.db
+chat.db-*

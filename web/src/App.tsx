@@ -8,9 +8,11 @@ import {
   type AvailabilityResult,
   type Booking,
   type Room,
+  type UiDirective,
 } from "./api";
 import { BookingModal } from "./components/BookingModal";
 import { BookingPreview } from "./components/BookingPreview";
+import { ChatPanel } from "./components/ChatPanel";
 import { FilterBar } from "./components/FilterBar";
 import { MyBookingsPanel } from "./components/MyBookingsPanel";
 import { RelaySettings } from "./components/RelaySettings";
@@ -36,6 +38,27 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMyBookings, setShowMyBookings] = useState(false);
   const [showFinder, setShowFinder] = useState(false);
+  /**
+   * The assistant is a side panel, open by default — it is part of the tool,
+   * not a dialog you summon. Defaults closed on a phone, where there is no
+   * room to show it alongside the grid, and the choice is remembered.
+   */
+  const [showChat, setShowChat] = useState(() => {
+    const stored = localStorage.getItem("chatOpen");
+    if (stored !== null) return stored === "1";
+    return typeof window !== "undefined" && window.innerWidth >= 1024;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("chatOpen", showChat ? "1" : "0");
+  }, [showChat]);
+  /**
+   * The view the assistant last drove. Held separately from the user's own
+   * filter state so "release" restores exactly what they had, and so it is
+   * always unambiguous which parts of the screen the assistant is responsible
+   * for — that is what the fuchsia framing marks.
+   */
+  const [aiView, setAiView] = useState<UiDirective | null>(null);
   const [selection, setSelection] = useState<{
     room: Room;
     minute: number;
@@ -52,6 +75,36 @@ export default function App() {
     pruneExpired(new Date().toISOString());
     setMyBookings(listMyBookings());
   }, []);
+
+  /**
+   * Apply what the chat looked at: jump to its day and adopt its filters.
+   * The user's own filters are not overwritten destructively — `releaseAi`
+   * puts them back — and nothing is applied if the turn had no view to show.
+   */
+  function applyAiDirective(d: UiDirective | null) {
+    if (!d) return;
+    setAiView(d);
+    if (d.date) {
+      setAnchor(d.date);
+      setSelected(d.date);
+    }
+    if (d.filters) {
+      setFilters((prev) => ({
+        ...prev,
+        ...(d.filters!.minCapacity !== undefined ? { minCapacity: d.filters!.minCapacity } : {}),
+        ...(d.filters!.amenities ? { amenities: d.filters!.amenities } : {}),
+        ...(d.filters!.minFreeMinutes !== undefined
+          ? { minFreeMinutes: d.filters!.minFreeMinutes }
+          : {}),
+      }));
+    }
+  }
+
+  /** Hand the view back to the user, clearing AI filters and highlights. */
+  function releaseAi() {
+    setAiView(null);
+    setFilters(EMPTY_FILTERS);
+  }
 
   function afterBookingChange() {
     setMyBookings(listMyBookings());
@@ -154,8 +207,23 @@ export default function App() {
 
   const error = fleetQuery.error ?? availabilityQuery.error;
 
+  /**
+   * Highlights are drawn per day, so the banner must count what is actually
+   * visible rather than the whole set — claiming "5 highlighted" while four
+   * are on screen is a small lie that erodes trust in the rest of it.
+   */
+  const aiHighlightCounts = useMemo(() => {
+    const all = aiView?.highlights ?? [];
+    const onThisDay = all.filter((h) => h.start.slice(0, 10) === selectedDate).length;
+    return { total: all.length, onThisDay, otherDays: all.length - onThisDay };
+  }, [aiView, selectedDate]);
+
   return (
-    <div className="mx-auto flex h-full max-w-6xl flex-col px-4 py-5 sm:px-6">
+    <div className="flex h-full min-h-0">
+      {/* Calendar column. `min-w-0` matters: without it the timeline's
+          intrinsic width stops the flex child from shrinking and the
+          assistant column gets squeezed off screen. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 py-4 sm:px-6 sm:py-5">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="text-base font-semibold text-slate-800 dark:text-slate-100">
           {fleetQuery.data?.site ?? "Rooms"}
@@ -175,6 +243,19 @@ export default function App() {
             className="rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           >
             Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowChat((v) => !v)}
+            aria-pressed={showChat}
+            className={
+              "rounded px-2 py-1 text-[11px] font-medium " +
+              (showChat
+                ? "bg-fuchsia-100 text-fuchsia-800 hover:bg-fuchsia-200 dark:bg-fuchsia-950/50 dark:text-fuchsia-200"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100")
+            }
+          >
+            Ask
           </button>
           <button
             type="button"
@@ -256,7 +337,40 @@ export default function App() {
             )}
           </div>
 
-          <div className="mt-3 border-y border-slate-200 py-2.5 dark:border-slate-800">
+          {aiView && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-t-md border border-b-0 border-fuchsia-300 bg-fuchsia-50 px-3 py-1.5 text-[11px] dark:border-fuchsia-800 dark:bg-fuchsia-950/30">
+              <span className="rounded-full bg-fuchsia-600 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase dark:bg-fuchsia-500">
+                Assistant
+              </span>
+              <span className="text-fuchsia-900 dark:text-fuchsia-200">
+                showing what it looked at
+                {aiHighlightCounts.total > 0 && (
+                  <>
+                    {" · "}
+                    {aiHighlightCounts.onThisDay} highlighted here
+                    {aiHighlightCounts.otherDays > 0 &&
+                      `, ${aiHighlightCounts.otherDays} on other days`}
+                  </>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={releaseAi}
+                className="ml-auto font-medium text-fuchsia-700 underline-offset-2 hover:underline dark:text-fuchsia-300"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          <div
+            className={
+              "mt-3 py-2.5 " +
+              (aiView
+                ? "mt-0 rounded-b-md border border-t-0 border-fuchsia-300 px-3 dark:border-fuchsia-800"
+                : "border-y border-slate-200 dark:border-slate-800")
+            }
+          >
             <FilterBar
               filters={filters}
               onChange={setFilters}
@@ -272,7 +386,7 @@ export default function App() {
               <SkeletonRows />
             ) : (
               <>
-                <div className="grid grid-cols-[minmax(8rem,11rem)_1fr] gap-3 sm:gap-4">
+                <div className="grid grid-cols-[minmax(5rem,7rem)_1fr] gap-2 sm:grid-cols-[minmax(8rem,11rem)_1fr] sm:gap-3 sm:gap-4">
                   <div />
                   <HourAxis dayStartHour={dayStartHour} dayEndHour={dayEndHour} />
                 </div>
@@ -292,6 +406,14 @@ export default function App() {
                           : undefined
                       }
                       onPreviewBooking={(room, booking) => setPreview({ room, booking })}
+                      {...(aiView?.highlights
+                        ? {
+                            highlights: aiView.highlights.filter(
+                              (h) => h.roomId === entry.room.id && h.start.slice(0, 10) === selectedDate,
+                            ),
+                          }
+                        : {})}
+                      focused={aiView?.focusRoomId === entry.room.id}
                     />
                   ))}
                   {availabilityQuery.data?.errors.map((e) => (
@@ -309,7 +431,39 @@ export default function App() {
         </>
       )}
 
+      </div>
+
+      {/* Assistant column.
+          Wide screens: a real sidebar sitting beside the grid.
+          Phones: a sheet covering most of the screen, since there is no room
+          to show both at once — same component, same conversation, laid out
+          by CSS rather than duplicated. */}
+      {showChat && (
+        <aside
+          className={
+            "fixed inset-x-0 bottom-0 top-0 z-40 border-slate-200 bg-white shadow-xl " +
+            "lg:static lg:inset-auto lg:z-auto lg:w-[22rem] lg:shrink-0 lg:border-l lg:shadow-none " +
+            "xl:w-[26rem] dark:border-slate-700 dark:bg-slate-900"
+          }
+        >
+          <ChatPanel
+            // Whatever the picker is showing becomes the chat's context, so
+            // "this room" and "that slot" resolve without being restated.
+            context={{
+              ...(selectedDate ? { selectedDate } : {}),
+              ...(selection ? { roomId: selection.room.id } : {}),
+              ...(preview ? { roomId: preview.room.id } : {}),
+            }}
+            rooms={fleetQuery.data?.rooms ?? []}
+            onDirective={applyAiDirective}
+            onCollapse={() => setShowChat(false)}
+            onBooked={afterBookingChange}
+          />
+        </aside>
+      )}
+
       {showSettings && <RelaySettings onClose={() => setShowSettings(false)} />}
+
 
       {showFinder && (
         <SlotFinder
@@ -434,7 +588,7 @@ function SkeletonRows() {
   return (
     <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="grid grid-cols-[minmax(8rem,11rem)_1fr] gap-3 py-2 sm:gap-4">
+        <div key={i} className="grid grid-cols-[minmax(5rem,7rem)_1fr] gap-2 sm:grid-cols-[minmax(8rem,11rem)_1fr] sm:gap-3 py-2 sm:gap-4">
           <div className="space-y-1.5 py-0.5">
             <div className="h-3.5 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
             <div className="h-2.5 w-14 animate-pulse rounded bg-slate-100 dark:bg-slate-800/60" />

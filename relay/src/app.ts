@@ -8,6 +8,7 @@
  */
 
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { z } from "zod";
@@ -25,6 +26,10 @@ import {
 } from "./availability.ts";
 import { findRoom, getFleet } from "./rooms.ts";
 import { findSlots } from "./slots.ts";
+import { runTurn, runTurnStream } from "./agent.ts";
+import { deleteConversation, listConversations, loadTranscript } from "./chatStore.ts";
+import { forgetBooking, pruneOwnedBookings, recordBooking } from "./bookingStore.ts";
+import { probeLlm } from "./llm.ts";
 import { fetchBookings, ApplianceError } from "./roomwizard.ts";
 import {
   BookingRejectedError,
@@ -68,14 +73,32 @@ const bookRequest = z.object({
   hostEmail: z.union([z.string().trim().email(), z.literal("")]).optional(),
   /** Caller-supplied password, or the relay generates one — see `generateBookingPassword`. */
   password: z.string().min(4).max(64).optional(),
+  /**
+   * Opaque key tying this booking to a chat thread, so the assistant can list,
+   * reschedule and cancel it later. Bearer-style, not an account — see
+   * `bookingStore.ts`. Omitted means the booking is tracked only by whoever
+   * holds the returned password.
+   */
+  ownerKey: z.string().min(1).max(100).optional(),
 });
 
 const cancelRequest = z.object({
   password: z.string().min(1),
+  ownerKey: z.string().min(1).max(100).optional(),
 });
 
 const unlockRequest = z.object({
   password: z.string().min(1),
+});
+
+const chatRequest = z.object({
+  conversationId: z.string().min(1).max(100),
+  message: z.string().trim().min(1).max(2000),
+  /** What the picker has selected, so "this room" / "that slot" resolve. */
+  selectedDate: z.string().optional(),
+  roomId: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
 });
 
 /**
@@ -150,6 +173,18 @@ export function createApp() {
   );
 
   app.get("/healthz", (c) => c.json({ ok: true, now: toIso(new Date()) }));
+
+  // Finished bookings are of no use to anyone and their stored passwords are
+  // the sensitive part, so drop them on startup and hourly thereafter.
+  const prune = () => {
+    try {
+      pruneOwnedBookings(new Date().toISOString());
+    } catch (err) {
+      console.error("[relay] pruning owned bookings failed", err);
+    }
+  };
+  prune();
+  setInterval(prune, 60 * 60 * 1000).unref();
 
   /** The fleet: rooms, capacities, amenities, bookable hours. */
   app.get("/api/rooms", async (c) => {
@@ -288,6 +323,17 @@ export function createApp() {
         password,
       });
       invalidateBookings();
+      if (body.ownerKey) {
+        recordBooking(body.ownerKey, {
+          bookingId: created.id,
+          roomId: created.roomId,
+          roomName: room.name,
+          start: created.start,
+          end: created.end,
+          purpose: created.purpose,
+          password: created.password,
+        });
+      }
       return c.json(created, 201);
     } catch (err) {
       if (err instanceof BookingRejectedError) {
@@ -525,6 +571,9 @@ export function createApp() {
     try {
       await cancelBooking({ room, bookingId: id, password: parsed.data.password });
       invalidateBookings();
+      // Drop any ownership record so the assistant stops offering a booking
+      // that no longer exists. Keyless cancels simply have nothing to drop.
+      if (parsed.data.ownerKey) forgetBooking(parsed.data.ownerKey, roomId, id);
       return c.json({ ok: true });
     } catch (err) {
       if (err instanceof BookingValidationError) {
@@ -535,6 +584,93 @@ export function createApp() {
       }
       throw err;
     }
+  });
+
+  // -------------------------------------------------------------------
+  // Chat
+  // -------------------------------------------------------------------
+
+  /** Is the model endpoint up? Lets the UI hide chat rather than fail oddly. */
+  app.get("/api/chat/health", async (c) => c.json(await probeLlm()));
+
+  /**
+   * One chat turn. Returns the reply plus any booking *proposals* — the relay
+   * never books from here; the user confirms a proposal, which goes through
+   * the ordinary POST /api/book path.
+   */
+  app.post("/api/chat", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = chatRequest.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid request", details: parsed.error.flatten() }, 400);
+    }
+    const b = parsed.data;
+    const turn = await runTurn({
+      conversationId: b.conversationId,
+      message: b.message,
+      ui: {
+        ...(b.selectedDate ? { selectedDate: b.selectedDate } : {}),
+        ...(b.roomId ? { roomId: b.roomId } : {}),
+        ...(b.startTime ? { startTime: b.startTime } : {}),
+        ...(b.endTime ? { endTime: b.endTime } : {}),
+      },
+    });
+    return c.json(turn);
+  });
+
+  /**
+   * Streaming chat turn, as Server-Sent Events.
+   *
+   * A 4B model on consumer hardware takes tens of seconds to answer, and
+   * waiting in silence for that reads as broken rather than slow. The
+   * non-streaming POST above is kept for scripts and tests, which want one
+   * JSON object rather than a token feed.
+   */
+  app.post("/api/chat/stream", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = chatRequest.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid request", details: parsed.error.flatten() }, 400);
+    }
+    const b = parsed.data;
+
+    return streamSSE(c, async (stream) => {
+      try {
+        for await (const ev of runTurnStream({
+          conversationId: b.conversationId,
+          message: b.message,
+          ui: {
+            ...(b.selectedDate ? { selectedDate: b.selectedDate } : {}),
+            ...(b.roomId ? { roomId: b.roomId } : {}),
+            ...(b.startTime ? { startTime: b.startTime } : {}),
+            ...(b.endTime ? { endTime: b.endTime } : {}),
+          },
+        })) {
+          await stream.writeSSE({ event: ev.type, data: JSON.stringify(ev) });
+        }
+      } catch (err) {
+        // Anything escaping the generator still has to reach the client as a
+        // terminal event, or the UI waits on a stream that will never end.
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        });
+      }
+    });
+  });
+
+  app.get("/api/chat/:conversationId", (c) =>
+    c.json({ messages: loadTranscript(c.req.param("conversationId")) }),
+  );
+
+  app.get("/api/conversations", (c) => c.json({ conversations: listConversations() }));
+
+  app.delete("/api/chat/:conversationId", (c) => {
+    deleteConversation(c.req.param("conversationId"));
+    return c.json({ ok: true });
   });
 
   app.notFound((c) => c.json({ error: "Not found" }, 404));

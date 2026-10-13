@@ -1,0 +1,85 @@
+# One-command deployment for a site admin.
+#
+#   cp deploy.env.example .env   # edit RW_ROSTER_HOST / RW_TIMEZONE
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# IMPORTANT: the host running this must be on the building's network (or its
+# VPN). The room appliances live on private addresses, so a public cloud VM
+# cannot reach them no matter how this is configured.
+
+services:
+  # Local model. First start downloads the weights into the `ollama` volume;
+  # `model-init` below does that for you so the relay is not left waiting.
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    # Not published by default: only the relay needs it. Uncomment to debug.
+    # ports:
+    #   - "11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: pull the model, then exit. Separated so a slow first-run
+  # download is visible in its own logs rather than looking like a hang.
+  model-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - ollama:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'ollama pull "${RW_LLM_MODEL:-qwen3:4b}"'
+    restart: "no"
+
+  relay:
+    build:
+      context: .
+      dockerfile: relay/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    environment:
+      # --- the two settings a new site actually has to change ---
+      RW_ROSTER_HOST: "${RW_ROSTER_HOST:-https://bsrl-203.arizona.edu/}"
+      RW_TIMEZONE: "${RW_TIMEZONE:-America/Phoenix}"
+      RW_SITE_NAME: "${RW_SITE_NAME:-BSRL}"
+      # Where the browser will reach this relay from; must match how users
+      # actually load the web UI, or CORS blocks every request.
+      RW_ALLOWED_ORIGINS: "${RW_ALLOWED_ORIGINS:-http://localhost:8080}"
+      RW_LLM_BASE_URL: "http://ollama:11434/v1"
+      RW_LLM_MODEL: "${RW_LLM_MODEL:-qwen3:4b}"
+      PORT: "8787"
+    ports:
+      - "${RW_RELAY_PORT:-8787}:8787"
+    volumes:
+      - chat:/data
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_BASE: "/"
+        # Baked in at build time, but also changeable at runtime from the
+        # UI's Relay panel, so a wrong guess here is recoverable.
+        VITE_RELAY_URL: "${RW_PUBLIC_RELAY_URL:-http://localhost:8787}"
+    restart: unless-stopped
+    depends_on:
+      - relay
+    ports:
+      - "${RW_WEB_PORT:-8080}:80"
+
+volumes:
+  ollama:
+  chat:

@@ -23,6 +23,7 @@ import { useState } from "react";
 import {
   RelayError,
   cancelBooking,
+  ownerKey,
   unlockBooking,
   updateBooking,
   type Booking,
@@ -187,7 +188,7 @@ export function BookingPreview({
     if (view.kind !== "edit") return;
     setView({ ...view, submitting: "delete", error: null });
     try {
-      await cancelBooking(room.id, booking.id, view.password);
+      await cancelBooking(room.id, booking.id, view.password, ownerKey());
       removeMyBooking(room.id, booking.id);
       onChanged();
       onClose();

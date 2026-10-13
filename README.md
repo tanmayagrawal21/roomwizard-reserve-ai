@@ -16,9 +16,9 @@ the build plan.
 
 ## Status
 
-**Phases 1-4 complete** — relay, picker UI, booking (create, edit, cancel), and a ranked
-slot finder, all verified against the live BSRL fleet by driving the real browser UI, not
-just the API.
+**All five phases complete** — relay, picker UI, booking (create, edit, cancel), a ranked
+slot finder, and a local-LLM assistant that drives the calendar. Verified against the
+live BSRL fleet by driving the real browser UI, not just the API.
 
 | Phase | What | State |
 |---|---|---|
@@ -27,7 +27,8 @@ just the API.
 | 2 | Picker UI | ✅ done |
 | 3 | Create, edit, cancel bookings, relay and UI | ✅ done, 118 tests, verified live end to end |
 | 4 | Slot finder | ✅ done, 159 tests, verified live |
-| 5 | Chat (local Qwen via Ollama) | next |
+| 5 | Chat (local Qwen via Ollama) | ✅ done, verified live |
+| — | Docker deployment, streaming, assistant-managed bookings | ✅ done |
 
 You can book through the UI: click a free slot on any room's timeline, fill in what it's
 for, your name, and optionally an email, and it's created on the real appliance.
@@ -80,18 +81,46 @@ To configure a non-BSRL installation, `cp relay/example.env relay/.env` and edit
 ### Checks
 
 ```bash
-npm test          # 159 tests (relay + web), no network access needed
+npm test          # 224 tests (relay + web), no network access needed
 npm run typecheck
 npm run build
 ```
 
-### Docker
+### Deploying the whole thing (Docker)
 
-The relay is containerized for running on a host inside the building's network:
+For a site admin, one command brings up the model, the relay, and the web UI:
+
+```bash
+cp deploy.env.example .env     # edit RW_ROSTER_HOST and RW_TIMEZONE
+docker compose up -d
+open http://localhost:8080
+```
+
+That starts four things: `ollama` (the model server), a one-shot `model-init`
+that pulls the model so a slow first download is visible in its own logs rather
+than looking like a hang, `relay`, and `web` behind nginx. Conversation history
+and model weights live in named volumes, so restarts keep both.
+
+**The host has to be on the building's network or its VPN.** The appliances use
+private addresses; a public cloud VM cannot reach them however this is
+configured.
+
+Two settings matter for a new site — the rest have working defaults:
+
+```bash
+RW_ROSTER_HOST=https://some-room.example.edu/   # any one appliance
+RW_TIMEZONE=America/New_York                    # IANA zone it sits in
+```
+
+If users will reach it as anything other than `localhost:8080`, set
+`RW_ALLOWED_ORIGINS` and `RW_PUBLIC_RELAY_URL` to match, or the browser blocks
+the relay's responses. See [deploy.env.example](deploy.env.example).
+
+Relay only, if you'd rather run the UI from GitHub Pages:
 
 ```bash
 docker build -f relay/Dockerfile -t rw-relay .
-docker run -p 8787:8787 --env-file relay/.env rw-relay
+docker run -p 8787:8787 --env-file relay/.env -v rw-chat:/data rw-relay
 ```
 
 ### Deploying the UI
@@ -157,6 +186,53 @@ file; "Edit 🔒" asks for one, and offers to remember it afterward if correct. 
 bookings** (top right) is just the list of what's currently remembered, with a cancel
 button on each. See the API section below for exactly what the relay does under the
 hood, including a real appliance quirk the edit path has to work around.
+
+## The assistant
+
+A side panel, open by default on a wide screen and collapsible to a sheet on a phone.
+It runs on a **local model** — `qwen3:4b` through Ollama by default — reached over an
+OpenAI-compatible API, so where the model runs is a URL (`RW_LLM_BASE_URL`), not an
+architectural decision.
+
+Ask in plain English: *"90 minutes tomorrow afternoon for 6 people with a camera"*,
+*"is BSRL-258 free Thursday?"*, *"book bsrl-203 tomorrow 5pm for sprint planning"*.
+
+**It drives the calendar.** When it searches, the grid jumps to the day it looked at,
+applies the filters implied by the question, and highlights the candidate openings in
+fuchsia. While it's doing that, the filter panel is framed in fuchsia with an
+**ASSISTANT** badge and a **Dismiss** link, so it is always obvious which parts of the
+screen it is responsible for and how to take them back.
+
+Those view changes are *derived from the tool calls it makes*, not requested separately.
+Asking a 4B model to also remember to call an "update the view" tool is exactly the
+discipline it doesn't reliably have, whereas the fact that it searched Thursday for
+camera rooms seating six is already unambiguous in the arguments it passed.
+
+**Replies stream** token by token, because a 4B model on consumer hardware takes tens of
+seconds and silence reads as broken rather than slow. While it works, the panel names the
+tool it's running ("searching for openings…") instead of a generic spinner.
+
+### What it can and can't do on its own
+
+It has tools for the whole lifecycle — `list_my_bookings`, `reschedule_my_booking`,
+`cancel_my_booking` — so someone working entirely through chat never has to fall back to
+the grid. Those act on bookings made through this app, tracked server-side and keyed to
+the chat thread.
+
+**Creating** is the one thing it deliberately cannot finish alone. It calls
+`propose_booking`, which returns a card; the card collects a password and a confirming
+click, and that click calls the ordinary booking API. A small model should not be able to
+claim a shared room on its own reading of an ambiguous sentence, and the same conflict
+guard that protects the picker applies — a proposal for an already-taken slot comes back
+as a conflict, not a card.
+
+**The cost of that capability, stated plainly:** making the assistant able to cancel and
+reschedule means the relay now stores booking passwords (`owned_bookings` in its SQLite).
+Before, it generated one, returned it once and forgot it. That database is therefore
+sensitive — it holds the only credential protecting each booking it created. Keep it on
+the campus host, in the Docker volume, and out of casual backups. It does not widen what
+the *appliance* exposes, which hands out its own hash of those passwords to anyone who
+asks. Expired bookings are pruned hourly.
 
 ## Finding a slot
 

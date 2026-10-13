@@ -11,7 +11,7 @@
  */
 
 import { useState } from "react";
-import { cancelBooking, RelayError } from "../api";
+import { cancelBooking, ownerKey, RelayError } from "../api";
 import { listMyBookings, removeMyBooking, type TrackedBooking } from "../lib/myBookings";
 
 interface Props {
@@ -29,7 +29,7 @@ export function MyBookingsPanel({ bookings, onClose, onChanged }: Props) {
     setCancellingId(b.id);
     setError(null);
     try {
-      await cancelBooking(b.roomId, b.id, b.password);
+      await cancelBooking(b.roomId, b.id, b.password, ownerKey());
       removeMyBooking(b.roomId, b.id);
       onChanged();
     } catch (err) {

@@ -13,7 +13,7 @@
  * sits on top of the same clickable container.
  */
 
-import type { Booking, RoomAvailability } from "../api";
+import type { Booking, RoomAvailability, SlotHighlight } from "../api";
 import { formatDuration, formatTime, minutesOfDay } from "../lib/time";
 
 interface Props {
@@ -28,6 +28,8 @@ interface Props {
   onSelectMinute?: (minute: number) => void;
   /** Opens a detail view for an existing booking. */
   onPreviewBooking?: (booking: Booking) => void;
+  /** Openings the assistant is pointing at, drawn over the free background. */
+  highlights?: SlotHighlight[];
 }
 
 export function Timeline({
@@ -39,6 +41,7 @@ export function Timeline({
   slotMinutes,
   onSelectMinute,
   onPreviewBooking,
+  highlights,
 }: Props) {
   const windowStart = dayStartHour * 60;
   const windowEnd = dayEndHour * 60;
@@ -117,6 +120,24 @@ export function Timeline({
         );
       })}
 
+      {/* Assistant suggestions, under the booking blocks so a highlight can
+          never visually imply a busy slot is free. */}
+      {highlights?.map((h, i) => {
+        const hStart = minutesOfDay(h.start, timeZone);
+        const rawEnd = minutesOfDay(h.end, timeZone);
+        const hEnd = rawEnd === 0 && hStart > 0 ? 24 * 60 : rawEnd;
+        const left = toPercent(hStart);
+        const width = Math.max(toPercent(hEnd) - left, 0.6);
+        return (
+          <div
+            key={`hl-${i}`}
+            className="pointer-events-none absolute top-0.5 bottom-0.5 rounded bg-fuchsia-400/25 ring-2 ring-inset ring-fuchsia-500/70 dark:bg-fuchsia-500/20 dark:ring-fuchsia-400/60"
+            style={{ left: `${left}%`, width: `${width}%` }}
+            title={h.label ? `Suggested: ${h.label}` : "Suggested"}
+          />
+        );
+      })}
+
       {nowMinutes !== null && nowMinutes >= windowStart && nowMinutes <= windowEnd && (
         <div
           className="pointer-events-none absolute -top-1 -bottom-1 z-10 w-0.5 bg-rose-500"
@@ -130,7 +151,14 @@ export function Timeline({
   );
 }
 
-/** Shared hour axis above the rows. */
+/**
+ * Shared hour axis above the rows.
+ *
+ * Every other label is hidden on narrow screens: twelve hours across a phone
+ * ran them together into "7am8 9 10 11 12pm1". Hiding rather than dropping
+ * them keeps the markup identical at every width, so the labels never drift
+ * out of step with the gridlines underneath.
+ */
 export function HourAxis({ dayStartHour, dayEndHour }: { dayStartHour: number; dayEndHour: number }) {
   const hours = Array.from({ length: dayEndHour - dayStartHour }, (_, i) => dayStartHour + i);
   return (
@@ -138,7 +166,11 @@ export function HourAxis({ dayStartHour, dayEndHour }: { dayStartHour: number; d
       {hours.map((h, i) => (
         <div
           key={h}
-          className="absolute text-[10px] font-medium text-slate-400 tabular-nums dark:text-slate-500"
+          className={
+            "absolute text-[10px] font-medium text-slate-400 tabular-nums dark:text-slate-500 " +
+            // Keep noon visible at every width; it is the main orientation point.
+            (i % 2 === 1 && h !== 12 ? "hidden sm:block" : "")
+          }
           style={{ left: `${(i / hours.length) * 100}%` }}
         >
           {h % 12 === 0 ? 12 : h % 12}

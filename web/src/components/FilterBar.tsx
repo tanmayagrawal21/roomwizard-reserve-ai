@@ -48,6 +48,14 @@ export function FilterBar({ filters, onChange, floors, capacities, matched, tota
             {c}+
           </Chip>
         ))}
+        {/* The assistant can set a headcount that matches no room capacity
+            (6, when the rooms seat 8 and 10). Show it rather than leaving
+            "any" lit while the filter is really applied. */}
+        {filters.minCapacity > 0 && !capacities.includes(filters.minCapacity) && (
+          <Chip active onClick={() => onChange({ ...filters, minCapacity: 0 })} title="Click to clear">
+            {filters.minCapacity}+
+          </Chip>
+        )}
       </Group>
 
       <Group label="Has">

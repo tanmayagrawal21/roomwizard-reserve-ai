@@ -134,6 +134,48 @@ export const MAX_BOOKING_HOURS = envNumber("MAX_BOOKING_HOURS", 8);
 export const MIN_BOOKING_MINUTES = envNumber("MIN_BOOKING_MINUTES", 5);
 
 // ---------------------------------------------------------------------------
+// Chat / LLM
+// ---------------------------------------------------------------------------
+
+/**
+ * OpenAI-compatible chat completions endpoint. Where the model actually runs
+ * is deliberately just a URL: Ollama locally today, a cheap hosted Qwen later,
+ * with no code change in between (PLAN.md section 4).
+ */
+export const LLM_BASE_URL = env("LLM_BASE_URL") ?? "http://localhost:11434/v1";
+
+export const LLM_MODEL = env("LLM_MODEL") ?? "qwen3:4b";
+
+/** Only needed by hosted providers; Ollama ignores it. */
+export const LLM_API_KEY = env("LLM_API_KEY") ?? "";
+
+/**
+ * A small local model on CPU is genuinely slow, and gets slower in later tool
+ * rounds as the context grows. Measured on qwen3:4b: a trivial prompt answers
+ * in ~5s, but a second round carrying the system prompt, history and a tool
+ * result took 100-150s and tripped a 120s limit mid-conversation. 300s is
+ * generous rather than optimistic; anyone running this on a GPU will never
+ * come near it.
+ */
+export const LLM_TIMEOUT_MS = envNumber("LLM_TIMEOUT_MS", 300_000);
+
+/**
+ * Max tool round-trips in one turn. A small model that has not figured out an
+ * answer in a handful of calls is looping, not thinking, and every extra call
+ * is another fan-out across nine 2013-era appliances.
+ */
+export const LLM_MAX_TOOL_ROUNDS = envNumber("LLM_MAX_TOOL_ROUNDS", 5);
+
+/** Where conversation history lives. `:memory:` disables persistence. */
+export const CHAT_DB_PATH = env("CHAT_DB_PATH") ?? "./chat.db";
+
+/**
+ * How many past messages to replay into a turn. Small models degrade quickly
+ * as context grows, so this stays short.
+ */
+export const CHAT_HISTORY_LIMIT = envNumber("CHAT_HISTORY_LIMIT", 20);
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 

@@ -14,12 +14,13 @@
  */
 
 import { useMemo, useState } from "react";
-import { createBooking, RelayError, type Room } from "../api";
+import { createBooking, ownerKey, RelayError, type Room } from "../api";
 import { addMyBooking } from "../lib/myBookings";
 import { getProfile, saveProfile } from "../lib/profile";
 import { allowedDurations, allowedEndMinutes, type EndTimeLimits } from "../lib/slots";
 import { minuteTo12h, minuteToClock } from "../lib/time";
 import { BookingFields, PREFERRED_DURATIONS } from "./BookingFields";
+import { generatePassword, PasswordField } from "./PasswordField";
 
 interface Props {
   room: Room;
@@ -77,6 +78,9 @@ export function BookingModal({
     return allowedEnds.length > 0 ? allowedEnds[allowedEnds.length - 1]! : startMinute + slotMinutes;
   });
   const [custom, setCustom] = useState(false);
+  // Pre-filled with a strong one so the safe path needs no extra thought, but
+  // fully editable for anyone who wants something they can pass to a colleague.
+  const [password, setPassword] = useState(() => generatePassword());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ password: string } | null>(null);
@@ -85,6 +89,7 @@ export function BookingModal({
     allowedEnds.length > 0 &&
     endMinute > startMinute &&
     purpose.trim() !== "" &&
+    password.length >= 4 &&
     (firstName.trim() !== "" || lastName.trim() !== "");
 
   async function submit() {
@@ -103,6 +108,8 @@ export function BookingModal({
         hostFirstName: firstName.trim(),
         hostLastName: lastName.trim(),
         hostEmail: trimmedEmail || undefined,
+        password,
+        ownerKey: ownerKey(),
       });
       saveProfile({ firstName: firstName.trim(), lastName: lastName.trim(), email: trimmedEmail });
       addMyBooking({
@@ -162,6 +169,8 @@ export function BookingModal({
               onEmailChange={setEmail}
               error={error}
             />
+
+            <PasswordField value={password} onChange={setPassword} />
 
             <div className="mt-4 flex justify-end gap-2">
               <button

@@ -163,6 +163,15 @@ export interface CreateBookingInput {
   hostLastName: string;
   /** Optional. Visible to anyone who views this room's schedule — there's no login to hide it behind. */
   hostEmail?: string;
+  /** Required to change or cancel later. Omit to let the relay generate one. */
+  password?: string;
+  /**
+   * Ties the booking to this browser's chat thread so the assistant can list,
+   * reschedule and cancel it without the browser's local copy. Sent for every
+   * booking, however it was made, so the chat and the My bookings panel see
+   * the same set.
+   */
+  ownerKey?: string;
 }
 
 export interface CreatedBooking {
@@ -220,10 +229,30 @@ export const updateBooking = (roomId: string, bookingId: string, input: UpdateBo
     input,
   );
 
-export const cancelBooking = (roomId: string, bookingId: string, password: string) =>
+export const cancelBooking = (
+  roomId: string,
+  bookingId: string,
+  password: string,
+  ownerKey?: string,
+) =>
   send<{ ok: true }>("DELETE", `/api/booking/${encodeURIComponent(roomId)}/${encodeURIComponent(bookingId)}`, {
     password,
+    ...(ownerKey ? { ownerKey } : {}),
   });
+
+/**
+ * This browser's stable chat-thread id, which doubles as the key tying its
+ * bookings to that thread. One per browser, so the assistant's idea of "your
+ * bookings" matches the My bookings panel's.
+ */
+export function ownerKey(): string {
+  let id = localStorage.getItem("conversationId");
+  if (!id) {
+    id = `c_${crypto.randomUUID()}`;
+    localStorage.setItem("conversationId", id);
+  }
+  return id;
+}
 
 // ---------------------------------------------------------------------------
 // Slot finding
@@ -270,6 +299,128 @@ export function findSlots(search: SlotSearch, signal?: AbortSignal) {
   if (search.latestHour !== undefined) p.set("latestHour", String(search.latestHour));
   return get<FindSlotsResult>(`/api/slots?${p.toString()}`, signal);
 }
+
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+
+export interface AgentProposal {
+  roomId: string;
+  roomName: string;
+  start: string;
+  end: string;
+  purpose: string;
+}
+
+export interface SlotHighlight {
+  roomId: string;
+  start: string;
+  end: string;
+  label?: string;
+}
+
+/** How the chat wants the calendar view to change. Derived from tool calls. */
+export interface UiDirective {
+  date?: string;
+  filters?: {
+    minCapacity?: number;
+    amenities?: Amenity[];
+    minFreeMinutes?: number;
+  };
+  highlights?: SlotHighlight[];
+  focusRoomId?: string;
+}
+
+export interface AgentTurn {
+  reply: string;
+  /** Rendered as confirmation cards. Nothing is booked until the user clicks. */
+  proposals: AgentProposal[];
+  toolsUsed: string[];
+  /** Null when the turn didn't look at anything view-worthy. */
+  uiDirective: UiDirective | null;
+}
+
+export interface ChatContext {
+  selectedDate?: string;
+  roomId?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+export const chatHealth = (signal?: AbortSignal) =>
+  get<{ ok: boolean; model: string; detail: string }>("/api/chat/health", signal);
+
+export const sendChat = (conversationId: string, message: string, ctx: ChatContext) =>
+  send<AgentTurn>("POST", "/api/chat", { conversationId, message, ...ctx });
+
+export type TurnEvent =
+  | { type: "token"; text: string }
+  | { type: "discard" }
+  | { type: "tool"; name: string }
+  | { type: "done"; turn: AgentTurn }
+  | { type: "error"; message: string };
+
+/**
+ * Streaming chat turn over SSE.
+ *
+ * Uses `fetch` with a manual parser rather than `EventSource`, because this
+ * is a POST with a JSON body and `EventSource` only does GET.
+ */
+export async function streamChat(
+  conversationId: string,
+  message: string,
+  ctx: ChatContext,
+  onEvent: (e: TurnEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${getRelayUrl()}/api/chat/stream`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ conversationId, message, ...ctx }),
+      signal,
+    });
+  } catch {
+    throw new RelayError(`Can't reach the relay at ${getRelayUrl()}`, 0, true);
+  }
+  if (!res.ok || !res.body) {
+    throw new RelayError(`Chat failed (HTTP ${res.status})`, res.status);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE frames are separated by a blank line; keep any trailing partial.
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        try {
+          onEvent(JSON.parse(payload) as TurnEvent);
+        } catch {
+          // A malformed frame is not worth tearing the stream down over.
+        }
+      }
+    }
+  }
+}
+
+export const loadTranscript = (conversationId: string, signal?: AbortSignal) =>
+  get<{ messages: { role: string; content: string; at: string }[] }>(
+    `/api/chat/${encodeURIComponent(conversationId)}`,
+    signal,
+  );
 
 export interface UnlockedBooking {
   purpose: string;
