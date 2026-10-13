@@ -1,0 +1,41 @@
+# NVIDIA GPU passthrough for the model container.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Kept as a separate override rather than folded into the base file on
+# purpose: requesting `driver: nvidia` on a host without the NVIDIA Container
+# Toolkit makes `docker compose up` fail outright, so the default has to stay
+# GPU-free and this has to be opt-in.
+#
+# Requires on the host:
+#   - an NVIDIA GPU and driver
+#   - the NVIDIA Container Toolkit
+#     (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+#
+# Check it worked:  curl -s localhost:8787/api/chat/health
+# which reports "running on GPU" once a model is resident.
+#
+# NOT useful on macOS. Docker Desktop runs a Linux VM with no access to the
+# host's Metal GPU, so a Mac host gets CPU-only inference inside containers no
+# matter what is configured here. On a Mac, run Ollama natively instead (it
+# uses Metal automatically) and point the relay at it with
+# RW_LLM_BASE_URL=http://host.docker.internal:11434/v1.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  model-init:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

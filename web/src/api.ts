@@ -348,7 +348,14 @@ export interface ChatContext {
 }
 
 export const chatHealth = (signal?: AbortSignal) =>
-  get<{ ok: boolean; model: string; detail: string }>("/api/chat/health", signal);
+  get<{
+    ok: boolean;
+    model: string;
+    detail: string;
+    /** Only reported for Ollama backends with a model resident. */
+    accelerator?: "gpu" | "cpu" | "partial";
+    offloadPercent?: number;
+  }>("/api/chat/health", signal);
 
 export const sendChat = (conversationId: string, message: string, ctx: ChatContext) =>
   send<AgentTurn>("POST", "/api/chat", { conversationId, message, ...ctx });

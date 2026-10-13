@@ -219,6 +219,27 @@ camera rooms seating six is already unambiguous in the arguments it passed.
 seconds and silence reads as broken rather than slow. While it works, the panel names the
 tool it's running ("searching for openings…") instead of a generic spinner.
 
+**GPU is automatic, and now visible.** Ollama detects and uses whatever accelerator the
+host has — on an Apple M4 it offloads 100% of `qwen3:4b` to Metal with no configuration.
+Because that either silently works or silently doesn't, `GET /api/chat/health` now
+reports it (`"accelerator":"gpu","offloadPercent":100`), and the Ask panel warns when a
+reply will be slow because the model ended up on CPU.
+
+In Docker it is *not* automatic. An NVIDIA host needs explicit passthrough:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+That lives in a separate override because requesting `driver: nvidia` on a host without
+the NVIDIA Container Toolkit makes `docker compose up` fail outright, so the default has
+to stay GPU-free.
+
+**On macOS there is no container GPU at all.** Docker Desktop runs a Linux VM with no
+access to Metal, so the compose stack is CPU-only on a Mac however it is configured. Run
+Ollama natively there (it uses Metal automatically) and point the relay at it with
+`RW_LLM_BASE_URL=http://host.docker.internal:11434/v1`.
+
 On speed, measured rather than assumed: generation runs ~35 tokens/sec for `qwen3:4b` on
 an M4 via Metal, and a cold model load costs about 1 second — neither is the bottleneck.
 A turn is slow because it generates several hundred tokens per tool round, ~90% of which

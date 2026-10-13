@@ -322,12 +322,51 @@ export function stripReasoning(content: string): string {
  * *configured* model is actually installed, which a completion only tells you
  * by failing.
  */
+/**
+ * Best-effort check of whether the model is resident on a GPU.
+ *
+ * Ollama-specific: `/api/ps` reports `size_vram`, and comparing it to `size`
+ * gives the offload fraction. Worth surfacing because GPU vs CPU is the single
+ * biggest factor in how this feels, and "is it actually using the GPU?" is
+ * otherwise invisible — Ollama auto-detects, so it either silently works or
+ * silently doesn't. Any non-Ollama backend simply reports nothing.
+ */
+async function probeAcceleration(): Promise<
+  { accelerator: "gpu" | "cpu" | "partial"; offloadPercent: number } | null
+> {
+  // /api/ps sits beside the OpenAI-compatible surface, not inside it.
+  const base = LLM_BASE_URL.replace(/\/+$/, "").replace(/\/v1$/, "");
+  try {
+    const res = await request(`${base}/api/ps`, {
+      method: "GET",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (res.statusCode !== 200) return null;
+    const parsed = JSON.parse(await res.body.text()) as {
+      models?: { name?: string; size?: number; size_vram?: number }[];
+    };
+    const m = parsed.models?.find((x) => x.name === LLM_MODEL) ?? parsed.models?.[0];
+    if (!m?.size) return null;
+    const pct = Math.round((100 * (m.size_vram ?? 0)) / m.size);
+    return {
+      accelerator: pct >= 95 ? "gpu" : pct <= 5 ? "cpu" : "partial",
+      offloadPercent: pct,
+    };
+  } catch {
+    // Not Ollama, not reachable, or no model loaded yet — all fine to skip.
+    return null;
+  }
+}
+
 export async function probeLlm(): Promise<{
   ok: boolean;
   model: string;
   detail: string;
   /** False when the endpoint is up but the configured model is not pulled. */
   modelInstalled?: boolean;
+  /** Only present for Ollama backends with a model currently resident. */
+  accelerator?: "gpu" | "cpu" | "partial";
+  offloadPercent?: number;
 }> {
   const url = `${LLM_BASE_URL.replace(/\/+$/, "")}/models`;
   try {
@@ -357,12 +396,16 @@ export async function probeLlm(): Promise<{
       ids.has(LLM_MODEL) ||
       [...ids].some((id) => id.startsWith(LLM_MODEL) || LLM_MODEL.startsWith(id));
 
+    const accel = installed ? await probeAcceleration() : null;
     return {
       ok: installed,
       model: LLM_MODEL,
       modelInstalled: installed,
+      ...(accel ? { accelerator: accel.accelerator, offloadPercent: accel.offloadPercent } : {}),
       detail: installed
-        ? "reachable"
+        ? accel
+          ? `reachable, running on ${accel.accelerator === "gpu" ? "GPU" : accel.accelerator === "cpu" ? "CPU" : `GPU (${accel.offloadPercent}% offloaded)`}`
+          : "reachable"
         : `reachable, but "${LLM_MODEL}" is not installed. Available: ${[...ids].slice(0, 6).join(", ") || "none"}`,
     };
   } catch (err) {

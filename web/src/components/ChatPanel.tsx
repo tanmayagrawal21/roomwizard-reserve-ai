@@ -8,7 +8,7 @@
  * able to claim a shared room on its own reading of an ambiguous sentence.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   chatHealth,
   createBooking,
@@ -64,6 +64,23 @@ export function ChatPanel({ context, rooms, onDirective, onCollapse, onBooked }:
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * Grow the textarea to fit what has been typed, up to the CSS max height.
+   *
+   * A textarea will not size itself, so this measures `scrollHeight` after
+   * collapsing to `auto` — resetting first is what makes it shrink again as
+   * text is deleted or after a send clears it. Capping is left to the
+   * `max-h-40` class rather than duplicated here, so the limit lives in one
+   * place; beyond it the element scrolls internally.
+   */
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
 
   const health = useQuery({
     queryKey: ["chatHealth"],
@@ -74,7 +91,10 @@ export function ChatPanel({ context, rooms, onDirective, onCollapse, onBooked }:
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
-  }, [bubbles, busy]);
+    // `input` is a dependency because the growing textarea shortens the
+    // transcript area; without this the last message drifts out of view as
+    // you type a long message.
+  }, [bubbles, busy, input]);
 
   async function submit() {
     const text = input.trim();
@@ -193,9 +213,12 @@ export function ChatPanel({ context, rooms, onDirective, onCollapse, onBooked }:
             <span className="font-medium text-slate-700 dark:text-slate-300">
               {health.data?.model ?? "a local model"}
             </span>{" "}
-            running on the relay in this building. Nothing you type is sent to any
-            third-party service. Your conversation is stored on that same machine so you can
-            pick it up again later.
+            running on the relay in this building
+            {health.data?.accelerator === "cpu" && " (on CPU — expect slow replies)"}
+            {health.data?.accelerator === "partial" &&
+              ` (only ${health.data.offloadPercent}% on the GPU — expect slow replies)`}
+            . Nothing you type is sent to any third-party service. Your conversation is
+            stored on that same machine so you can pick it up again later.
           </div>
 
           {bubbles.length === 0 && (
@@ -262,21 +285,32 @@ export function ChatPanel({ context, rooms, onDirective, onCollapse, onBooked }:
       </div>
 
       <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
-        <div className="flex gap-2">
-          <input
-            type="text"
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={inputRef}
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
+            onKeyDown={(e) => {
+              // Enter sends; Shift+Enter adds a line, which is the convention
+              // people already expect from every other chat box.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
             placeholder="an hour tomorrow with a camera"
-            // 16px minimum, or iOS Safari zooms the whole page on focus.
-            className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2.5 py-2 text-base text-slate-800 outline-none focus:border-slate-500 sm:py-1.5 sm:text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            // `max-h-40` caps the growth so a long message cannot push the
+            // conversation off screen; past that the textarea scrolls itself.
+            // `text-base` on small screens because anything under 16px makes
+            // iOS Safari zoom the whole page on focus.
+            className="max-h-40 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border border-slate-300 bg-white px-2.5 py-2 text-base leading-snug text-slate-800 outline-none focus:border-slate-500 sm:text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
           <button
             type="button"
             onClick={submit}
             disabled={busy || input.trim() === ""}
-            className="shrink-0 rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+            className="shrink-0 rounded-md bg-slate-800 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
           >
             Send
           </button>
